@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DRI Board - Operational Readiness Command Center</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/panels.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+</head>
+<body>
+  <!-- Sidebar Navigation -->
+  <nav id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <i class="fas fa-shield-halved"></i>
+        <span class="logo-text">DRI Board</span>
+      </div>
+      <div class="subtitle">Operational Readiness</div>
+    </div>
+    <ul class="nav-items">
+      <li class="nav-item active" data-panel="mission-control">
+        <i class="fas fa-rocket"></i><span>Mission Control</span>
+        <span class="nav-badge urgent" id="nav-badge-mc">3</span>
+      </li>
+      <li class="nav-item" data-panel="workstreams">
+        <i class="fas fa-diagram-project"></i><span>Workstreams</span>
+        <span class="nav-badge" id="nav-badge-ws">5</span>
+      </li>
+      <li class="nav-item" data-panel="comms-queue">
+        <i class="fas fa-comments"></i><span>Comms Queue</span>
+        <span class="nav-badge urgent" id="nav-badge-cq">8</span>
+      </li>
+      <li class="nav-item" data-panel="collaborator-sentiment">
+        <i class="fas fa-users"></i><span>Collaborator Sentiment</span>
+        <span class="nav-badge warning" id="nav-badge-cs">2</span>
+      </li>
+      <li class="nav-item" data-panel="worldview">
+        <i class="fas fa-globe"></i><span>Worldview</span>
+      </li>
+      <li class="nav-item" data-panel="ai-recommender">
+        <i class="fas fa-brain"></i><span>AI Recommender</span>
+        <span class="nav-badge" id="nav-badge-ai">4</span>
+      </li>
+      <li class="nav-item" data-panel="intake-triage">
+        <i class="fas fa-inbox"></i><span>Intake / Triage</span>
+      </li>
+      <li class="nav-item" data-panel="gap-analysis">
+        <i class="fas fa-magnifying-glass-chart"></i><span>Gap Analysis</span>
+      </li>
+      <li class="nav-item" data-panel="qbr-engine">
+        <i class="fas fa-chart-line"></i><span>QBR Engine</span>
+      </li>
+      <li class="nav-item" data-panel="brag-board">
+        <i class="fas fa-trophy"></i><span>Brag Board</span>
+      </li>
+      <li class="nav-item" data-panel="decision-log">
+        <i class="fas fa-gavel"></i><span>Decision Log</span>
+      </li>
+    </ul>
+    <div class="sidebar-footer">
+      <div class="user-info">
+        <div class="user-avatar">SL</div>
+        <div class="user-details">
+          <span class="user-name">Strategy Lead</span>
+          <span class="user-role">Operational Readiness</span>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content Area -->
+  <main id="main-content">
+    <!-- Top Bar -->
+    <header id="top-bar">
+      <button id="sidebar-toggle" class="icon-btn"><i class="fas fa-bars"></i></button>
+      <div class="top-bar-title" id="panel-title">Mission Control</div>
+      <div class="top-bar-actions">
+        <div class="search-box">
+          <i class="fas fa-search"></i>
+          <input type="text" placeholder="Search initiatives, people, docs..." id="global-search" />
+        </div>
+        <button class="icon-btn" title="Notifications"><i class="fas fa-bell"></i><span class="notif-dot"></span></button>
+        <button class="icon-btn" title="Settings"><i class="fas fa-gear"></i></button>
+      </div>
+    </header>
+
+    <!-- Panel Container -->
+    <div id="panel-container">
+
+      <!-- ========== PANEL 1: MISSION CONTROL ========== -->
+      <section id="mission-control" class="panel active">
+        <div class="panel-grid mc-grid">
+          <!-- Readiness Score -->
+          <div class="card mc-readiness">
+            <div class="card-header">
+              <h3>Overall Readiness</h3>
+              <span class="card-badge">Weighted</span>
+            </div>
+            <div class="readiness-ring-container">
+              <svg class="readiness-ring" viewBox="0 0 120 120">
+                <circle cx="60" cy="60" r="52" class="ring-bg" />
+                <circle cx="60" cy="60" r="52" class="ring-fill" id="readiness-ring-fill" />
+              </svg>
+              <div class="readiness-value" id="readiness-value">74%</div>
+            </div>
+            <div class="readiness-formula">P0×3 + P1×2 + P2×1.5 + P3×1</div>
+          </div>
+
+          <!-- Quick Stats -->
+          <div class="card mc-stats">
+            <div class="stat-row">
+              <div class="stat-item">
+                <div class="stat-number" id="stat-active">4</div>
+                <div class="stat-label">Active</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-number" id="stat-measuring">2</div>
+                <div class="stat-label">In Measurement</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-number warning" id="stat-atrisk">2</div>
+                <div class="stat-label">At-Risk Collaborators</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-number urgent" id="stat-unreplied">5</div>
+                <div class="stat-label">Unreplied Mentions</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Actions Due Today -->
+          <div class="card mc-actions">
+            <div class="card-header">
+              <h3>Actions Due Today</h3>
+              <span class="card-count" id="actions-count">3</span>
+            </div>
+            <ul class="action-list" id="actions-list">
+              <!-- Populated by JS -->
+            </ul>
+          </div>
+
+          <!-- Top Checklist Items -->
+          <div class="card mc-checklist">
+            <div class="card-header">
+              <h3>Priority Checklist Items</h3>
+              <span class="card-subtitle">Sorted by P-level, then deadline</span>
+            </div>
+            <ul class="checklist" id="mc-checklist">
+              <!-- Populated by JS -->
+            </ul>
+          </div>
+
+          <!-- AI Recommendations (Urgent) -->
+          <div class="card mc-recommendations">
+            <div class="card-header">
+              <h3><i class="fas fa-brain"></i> Urgent Recommendations</h3>
+            </div>
+            <div class="rec-list" id="mc-recs">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+
+          <!-- Collaboration Health -->
+          <div class="card mc-collab-health">
+            <div class="card-header">
+              <h3>Collaboration Health Alerts</h3>
+            </div>
+            <div class="collab-alerts" id="mc-collab-alerts">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== PANEL 2: WORKSTREAMS ========== -->
+      <section id="workstreams" class="panel">
+        <div class="panel-toolbar">
+          <div class="filter-group">
+            <button class="filter-btn active" data-filter="active-measuring">Active + In Measurement</button>
+            <button class="filter-btn" data-filter="all">All</button>
+          </div>
+          <div class="sort-group">
+            <label>Sort:</label>
+            <select id="ws-sort">
+              <option value="priority">P-Level</option>
+              <option value="deadline">Deadline</option>
+              <option value="progress">Progress</option>
+            </select>
+          </div>
+        </div>
+        <div class="workstream-list" id="workstream-list">
+          <!-- Populated by JS -->
+        </div>
+      </section>
+
+      <!-- ========== PANEL 3: COMMS QUEUE ========== -->
+      <section id="comms-queue" class="panel">
+        <div class="tabs">
+          <button class="tab active" data-tab="unreplied">Unreplied Mentions <span class="tab-count">5</span></button>
+          <button class="tab" data-tab="open-threads">Open Threads <span class="tab-count">3</span></button>
+          <button class="tab" data-tab="proactive">Proactive Chime-In <span class="tab-count">4</span></button>
+        </div>
+        <div class="tab-content active" id="tab-unreplied">
+          <div class="comms-list" id="unreplied-list"></div>
+        </div>
+        <div class="tab-content" id="tab-open-threads">
+          <div class="comms-list" id="open-threads-list"></div>
+        </div>
+        <div class="tab-content" id="tab-proactive">
+          <div class="comms-list" id="proactive-list"></div>
+        </div>
+      </section>
+
+      <!-- ========== PANEL 4: COLLABORATOR SENTIMENT ========== -->
+      <section id="collaborator-sentiment" class="panel">
+        <div class="panel-toolbar">
+          <div class="filter-group">
+            <button class="filter-btn" data-tier="org">Org</button>
+            <button class="filter-btn active" data-tier="role">Role</button>
+            <button class="filter-btn" data-tier="individual">Individual</button>
+          </div>
+          <div class="search-inline">
+            <i class="fas fa-search"></i>
+            <input type="text" placeholder="Search collaborators..." id="collab-search" />
+          </div>
+        </div>
+        <div class="sentiment-grid" id="sentiment-grid"></div>
+        <div class="sentiment-detail-modal" id="sentiment-modal" style="display:none;">
+          <div class="modal-overlay"></div>
+          <div class="modal-content">
+            <button class="modal-close"><i class="fas fa-times"></i></button>
+            <div id="sentiment-modal-body"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== PANEL 5: WORLDVIEW ========== -->
+      <section id="worldview" class="panel">
+        <div class="panel-toolbar">
+          <div class="filter-group">
+            <button class="filter-btn active" data-wv="all">All</button>
+            <button class="filter-btn" data-wv="competitive">Competitive</button>
+            <button class="filter-btn" data-wv="regulatory">Regulatory</button>
+            <button class="filter-btn" data-wv="innovation">Innovation</button>
+            <button class="filter-btn" data-wv="trends">Trends</button>
+          </div>
+        </div>
+        <div class="worldview-grid" id="worldview-grid"></div>
+      </section>
+
+      <!-- ========== PANEL 6: AI RECOMMENDER ========== -->
+      <section id="ai-recommender" class="panel">
+        <div class="card-header panel-header">
+          <h3>AI Recommendations</h3>
+          <span class="card-subtitle">Proactive actions based on playbook triggers</span>
+        </div>
+        <div class="recommender-list" id="recommender-list"></div>
+      </section>
+
+      <!-- ========== PANEL 7: INTAKE / TRIAGE ========== -->
+      <section id="intake-triage" class="panel">
+        <div class="intake-container">
+          <div class="intake-input-section">
+            <div class="card">
+              <div class="card-header">
+                <h3>Describe the Change</h3>
+                <span class="card-subtitle">Free text. Be specific about what's changing, who's affected, and when.</span>
+              </div>
+              <textarea id="intake-text" placeholder="Example: Cash App is launching a new Savings product on April 15. All Banking LOB advocates need to understand the new interest rate tiers, eligibility criteria, and how to handle customer questions about FDIC insurance. BPO partners in Manila and Bogota need training materials translated. This is a P0 launch with marketing push."></textarea>
+              <div class="intake-actions">
+                <button class="btn btn-primary" id="intake-generate"><i class="fas fa-wand-magic-sparkles"></i> Generate Readiness Plan</button>
+                <button class="btn btn-secondary" id="intake-clear"><i class="fas fa-eraser"></i> Clear</button>
+              </div>
+            </div>
+          </div>
+          <div class="intake-output-section" id="intake-output" style="display:none;">
+            <!-- Generated by JS -->
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== PANEL 8: GAP ANALYSIS ========== -->
+      <section id="gap-analysis" class="panel">
+        <div class="gap-container">
+          <div class="gap-input-section">
+            <div class="card">
+              <div class="card-header">
+                <h3>Paste Plan / Proposal / Brief</h3>
+                <span class="card-subtitle">Red-team any document against playbook requirements</span>
+              </div>
+              <textarea id="gap-text" placeholder="Paste the full text of any plan, proposal, or brief here. The AI will red-team it against playbook requirements, tenets, RAPID completeness, and historical patterns."></textarea>
+              <div class="intake-actions">
+                <button class="btn btn-primary" id="gap-analyze"><i class="fas fa-magnifying-glass-chart"></i> Analyze Gaps</button>
+                <button class="btn btn-secondary" id="gap-clear"><i class="fas fa-eraser"></i> Clear</button>
+              </div>
+            </div>
+          </div>
+          <div class="gap-output-section" id="gap-output" style="display:none;"></div>
+        </div>
+      </section>
+
+      <!-- ========== PANEL 9: QBR ENGINE ========== -->
+      <section id="qbr-engine" class="panel">
+        <div class="qbr-container">
+          <div class="card qbr-controls">
+            <div class="card-header">
+              <h3>Quarterly Business Review Generator</h3>
+            </div>
+            <div class="qbr-options">
+              <div class="form-group">
+                <label>Quarter</label>
+                <select id="qbr-quarter">
+                  <option value="Q1-2026" selected>Q1 2026</option>
+                  <option value="Q4-2025">Q4 2025</option>
+                  <option value="Q3-2025">Q3 2025</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Focus Areas</label>
+                <div class="checkbox-group">
+                  <label><input type="checkbox" checked /> Executive Summary</label>
+                  <label><input type="checkbox" checked /> Program Results</label>
+                  <label><input type="checkbox" checked /> KPI Dashboard</label>
+                  <label><input type="checkbox" checked /> Start/Stop/Continue</label>
+                  <label><input type="checkbox" checked /> Resource Utilization</label>
+                  <label><input type="checkbox" checked /> Forward Pipeline</label>
+                </div>
+              </div>
+              <button class="btn btn-primary" id="qbr-generate"><i class="fas fa-file-lines"></i> Generate QBR Draft</button>
+            </div>
+          </div>
+          <div class="qbr-output" id="qbr-output" style="display:none;"></div>
+        </div>
+      </section>
+
+      <!-- ========== PANEL 10: BRAG BOARD ========== -->
+      <section id="brag-board" class="panel">
+        <div class="brag-container">
+          <div class="panel-toolbar">
+            <div class="filter-group">
+              <button class="filter-btn active" data-comp="all">All</button>
+              <button class="filter-btn" data-comp="data-acumen">Data Acumen</button>
+              <button class="filter-btn" data-comp="strategic">Strategic Thinking</button>
+              <button class="filter-btn" data-comp="cross-func">Cross-Functional</button>
+              <button class="filter-btn" data-comp="operational">Operational Execution</button>
+              <button class="filter-btn" data-comp="communication">Communication</button>
+              <button class="filter-btn" data-comp="drive-results">Drive Results</button>
+            </div>
+            <button class="btn btn-primary" id="brag-add"><i class="fas fa-plus"></i> Log Win</button>
+            <button class="btn btn-accent" id="brag-generate-review"><i class="fas fa-star"></i> Generate Year-End Review</button>
+          </div>
+          <div class="brag-grid" id="brag-grid"></div>
+        </div>
+        <!-- Add Win Modal -->
+        <div class="modal" id="add-win-modal" style="display:none;">
+          <div class="modal-overlay"></div>
+          <div class="modal-content">
+            <button class="modal-close"><i class="fas fa-times"></i></button>
+            <h3>Log a Win</h3>
+            <div class="form-group"><label>Title</label><input type="text" id="win-title" /></div>
+            <div class="form-group"><label>Description</label><textarea id="win-desc"></textarea></div>
+            <div class="form-group"><label>Competency</label>
+              <select id="win-comp">
+                <option value="data-acumen">Data Acumen</option>
+                <option value="strategic">Strategic Thinking</option>
+                <option value="cross-func">Cross-Functional Influence</option>
+                <option value="operational">Operational Execution</option>
+                <option value="communication">Communication</option>
+                <option value="drive-results">Drive Results</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Evidence Link</label><input type="text" id="win-evidence" placeholder="Jira ticket, doc link, etc." /></div>
+            <button class="btn btn-primary" id="win-save">Save Win</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== PANEL 11: DECISION LOG ========== -->
+      <section id="decision-log" class="panel">
+        <div class="decision-container">
+          <div class="panel-toolbar">
+            <div class="filter-group">
+              <button class="filter-btn active" data-dtype="all">All</button>
+              <button class="filter-btn" data-dtype="p-level">P-Level Classification</button>
+              <button class="filter-btn" data-dtype="go-nogo">Go/No-Go</button>
+              <button class="filter-btn" data-dtype="resource">Resource Tradeoff</button>
+              <button class="filter-btn" data-dtype="escalation">Escalation</button>
+            </div>
+            <button class="btn btn-primary" id="decision-add"><i class="fas fa-plus"></i> Log Decision</button>
+          </div>
+          <div class="decision-list" id="decision-list"></div>
+          <div class="decision-patterns card" id="decision-patterns">
+            <div class="card-header"><h3><i class="fas fa-chart-bar"></i> Decision Quality Patterns</h3></div>
+            <div id="patterns-content"></div>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- /panel-container -->
+  </main>
+
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/panels.js"></script>
+</body>
+</html>
