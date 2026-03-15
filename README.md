@@ -1,41 +1,34 @@
-# DRI Board (Demo)
+# DRI Board (Prototype)
 
-Operational Readiness command center UI scaffold inspired by the prompt.
+Operational readiness command center UI prototype based on your prompt.
 
 ## What this is
-- A **static HTML/CSS/JS single-page app** with 11 panels:
-  1. Mission Control
-  2. Workstreams
-  3. Comms Queue
-  4. Collaborator Sentiment
-  5. Worldview
-  6. AI Recommender
-  7. Intake / Triage
-  8. Gap Analysis
-  9. QBR Engine
-  10. Brag Board / Impact Journal
-  11. Decision Log
+- A single-page HTML/CSS/JS dashboard with **11 panels** (Mission Control, Workstreams, Comms Queue, etc.)
+- Uses **synthetic mock data** (`js/data.js`) to demonstrate interactions
+- Includes **snooze (Not Relevant)** behavior stored in `localStorage`
 
-## What this is not
-- Not connected to Jira, Slack, Glean, Snowflake.
-- Uses **mock/demo data only**.
+## What this is not (yet)
+- Not wired to Jira/Glean/Snowflake
+- No real AI generation. Buttons simulate artifact generation and Jira write-back
 
 ## Run locally
-From the repo root:
+Option A: open directly
+- Double-click `index.html`
 
+Option B: run a local server (recommended)
 ```bash
-python3 -m http.server 8080
+cd dri-board
+python3 -m http.server 8000
+# then open http://localhost:8000
 ```
 
-Open:
-- http://localhost:8080
+## Project structure
+- `index.html` - shell + panel containers
+- `css/styles.css` - core theme and components
+- `css/panels.css` - panel-specific layout
+- `js/data.js` - mock data + helpers
+- `js/app.js` - navigation, snoozing, global search
+- `js/panels.js` - renderers for each panel
 
-## Replace demo data
-Edit:
-- `js/data.js`
-
-## Next step: real integrations
-Typical approach:
-- Replace `js/data.js` with calls to your backend.
-- Add Jira/Slack/Glean/Snowflake connectors server-side.
-- Keep this UI as the command center.
+## Next step
+If you share a GitHub repo URL (or confirm you want me to create one with `gh`), I will push this project to GitHub.

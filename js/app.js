@@ -1,136 +1,150 @@
-/* Core application behavior: nav, sidebar, search, persistence */
+/*
+  DRI Board - Core App Logic
+*/
 
-(function () {
-  const $ = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+const panelTitles = {
+  'mission-control': 'Mission Control',
+  'workstreams': 'Workstreams',
+  'comms-queue': 'Comms Queue',
+  'collaborator-sentiment': 'Collaborator Sentiment',
+  'worldview': 'Worldview',
+  'ai-recommender': 'AI Recommender',
+  'intake-triage': 'Intake / Triage',
+  'gap-analysis': 'Gap Analysis',
+  'qbr-engine': 'QBR Engine',
+  'brag-board': 'Brag Board / Impact Journal',
+  'decision-log': 'Decision Log'
+};
 
-  const STORAGE_KEY = "dri_board_state_v1";
+function qs(sel, root = document) { return root.querySelector(sel); }
+function qsa(sel, root = document) { return [...root.querySelectorAll(sel)]; }
 
-  function loadState() {
-    try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") || {};
-    } catch {
-      return {};
-    }
+function escapeHtml(str) {
+  return (str || '').replace(/[&<>"]+/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m] || m));
+}
+
+function setActivePanel(panelId) {
+  qsa('.panel').forEach(p => p.classList.remove('active'));
+  qs(`#${panelId}`)?.classList.add('active');
+
+  qsa('.nav-item').forEach(i => i.classList.remove('active'));
+  qs(`.nav-item[data-panel="${panelId}"]`)?.classList.add('active');
+
+  qs('#panel-title').textContent = panelTitles[panelId] || 'DRI Board';
+
+  // Render when switching
+  if (typeof renderAll === 'function') renderAll(panelId);
+}
+
+function toggleSidebar() {
+  const sidebar = qs('#sidebar');
+  // Desktop collapse, mobile open
+  if (window.innerWidth <= 1024) {
+    sidebar.classList.toggle('open');
+  } else {
+    sidebar.classList.toggle('collapsed');
   }
+}
 
-  function saveState(patch) {
-    const current = loadState();
-    const next = { ...current, ...patch };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    return next;
-  }
-
-  function nowISO() {
-    return new Date().toISOString();
-  }
-
-  function setPanel(panelId) {
-    $$(".panel").forEach((p) => p.classList.remove("active"));
-    const panel = document.getElementById(panelId);
-    if (panel) panel.classList.add("active");
-
-    $$(".nav-item").forEach((i) => i.classList.remove("active"));
-    const nav = $(`.nav-item[data-panel="${panelId}"]`);
-    if (nav) nav.classList.add("active");
-
-    const title = nav ? (nav.textContent || "").trim().replace(/\s+\d+\s*$/, "") : panelId;
-    $("#panel-title").textContent = title;
-
-    saveState({ activePanel: panelId, lastNavAt: nowISO() });
-  }
-
-  function toggleSidebar() {
-    const sidebar = $("#sidebar");
-    if (window.innerWidth <= 1024) {
-      sidebar.classList.toggle("open");
-    } else {
-      sidebar.classList.toggle("collapsed");
-      saveState({ sidebarCollapsed: sidebar.classList.contains("collapsed") });
-    }
-  }
-
-  function initNav() {
-    $$(".nav-item").forEach((item) => {
-      item.addEventListener("click", () => {
-        const panel = item.dataset.panel;
-        setPanel(panel);
-        // Close sidebar on mobile after navigation
-        const sidebar = $("#sidebar");
-        if (window.innerWidth <= 1024 && sidebar.classList.contains("open")) {
-          sidebar.classList.remove("open");
-        }
-      });
+function initNavigation() {
+  qsa('.nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const panel = item.getAttribute('data-panel');
+      setActivePanel(panel);
+      if (window.innerWidth <= 1024) qs('#sidebar').classList.remove('open');
     });
-
-    $("#sidebar-toggle").addEventListener("click", toggleSidebar);
-
-    // click outside sidebar closes on mobile
-    document.addEventListener("click", (e) => {
-      if (window.innerWidth > 1024) return;
-      const sidebar = $("#sidebar");
-      const toggle = $("#sidebar-toggle");
-      if (!sidebar.classList.contains("open")) return;
-      if (sidebar.contains(e.target) || toggle.contains(e.target)) return;
-      sidebar.classList.remove("open");
-    });
-  }
-
-  function initTabs() {
-    $$(".tabs").forEach((tabsRoot) => {
-      const tabs = $$(".tab", tabsRoot);
-      tabs.forEach((tab) => {
-        tab.addEventListener("click", () => {
-          tabs.forEach((t) => t.classList.remove("active"));
-          tab.classList.add("active");
-
-          const tabName = tab.dataset.tab;
-          const panel = tabsRoot.closest(".panel");
-          if (!panel) return;
-
-          $$(".tab-content", panel).forEach((c) => c.classList.remove("active"));
-          const target = panel.querySelector(`#tab-${tabName}`);
-          if (target) target.classList.add("active");
-        });
-      });
-    });
-  }
-
-  function initGlobalSearch() {
-    const input = $("#global-search");
-    if (!input) return;
-
-    input.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter") return;
-      const q = input.value.trim().toLowerCase();
-      if (!q) return;
-
-      // Simple behavior: route to Workstreams and filter by query
-      setPanel("workstreams");
-      window.dispatchEvent(new CustomEvent("dri:search", { detail: { query: q } }));
-    });
-  }
-
-  function applySavedUIState() {
-    const state = loadState();
-    if (state.sidebarCollapsed) {
-      $("#sidebar").classList.add("collapsed");
-    }
-    if (state.activePanel) {
-      setPanel(state.activePanel);
-    }
-  }
-
-  window.DRI_APP = {
-    loadState,
-    saveState,
-    setPanel
-  };
-
-  document.addEventListener("DOMContentLoaded", () => {
-    initNav();
-    initTabs();
-    initGlobalSearch();
-    applySavedUIState();
   });
-})();
+
+  qs('#sidebar-toggle').addEventListener('click', toggleSidebar);
+
+  // Close sidebar on overlay tap for mobile
+  document.addEventListener('click', (e) => {
+    if (window.innerWidth > 1024) return;
+    const sidebar = qs('#sidebar');
+    if (!sidebar.classList.contains('open')) return;
+    const clickedInside = sidebar.contains(e.target) || qs('#sidebar-toggle').contains(e.target);
+    if (!clickedInside) sidebar.classList.remove('open');
+  });
+}
+
+function initTabs() {
+  const tabs = qsa('#comms-queue .tab');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+
+      qsa('#comms-queue .tab-content').forEach(c => c.classList.remove('active'));
+      const which = tab.getAttribute('data-tab');
+      qs(`#tab-${which}`)?.classList.add('active');
+    });
+  });
+}
+
+function initModalCloseHandlers() {
+  // Generic modals
+  qsa('.modal, .sentiment-detail-modal').forEach(modal => {
+    const closeBtn = qs('.modal-close', modal);
+    const overlay = qs('.modal-overlay', modal);
+    closeBtn?.addEventListener('click', () => modal.style.display = 'none');
+    overlay?.addEventListener('click', () => modal.style.display = 'none');
+  });
+}
+
+function initGlobalSearch() {
+  const input = qs('#global-search');
+  if (!input) return;
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const q = input.value.trim().toLowerCase();
+    if (!q) return;
+
+    // Very lightweight: jump to first matching initiative
+    const match = initiatives.find(i =>
+      i.id.toLowerCase().includes(q) ||
+      i.name.toLowerCase().includes(q) ||
+      (i.description || '').toLowerCase().includes(q)
+    );
+
+    if (match) {
+      setActivePanel('workstreams');
+      // Expand matching card after render
+      setTimeout(() => {
+        const card = qs(`.ws-card[data-id="${match.id}"]`);
+        if (card) {
+          card.classList.add('expanded');
+          card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 50);
+    } else {
+      alert('No matches in demo data. (Integrations will expand search scope.)');
+    }
+  });
+}
+
+function snooze(kind, id) {
+  if (kind === 'rec') store.snoozed.recs.add(id);
+  if (kind === 'comms') store.snoozed.comms.add(id);
+  if (kind === 'worldview') store.snoozed.worldview.add(id);
+  persistSnoozes();
+  if (typeof renderAll === 'function') renderAll();
+}
+
+function unsnoozeAll() {
+  store.snoozed.recs.clear();
+  store.snoozed.comms.clear();
+  store.snoozed.worldview.clear();
+  persistSnoozes();
+  if (typeof renderAll === 'function') renderAll();
+}
+
+function initApp() {
+  initNavigation();
+  initTabs();
+  initModalCloseHandlers();
+  initGlobalSearch();
+  // Default panel
+  setActivePanel('mission-control');
+}
+
+document.addEventListener('DOMContentLoaded', initApp);

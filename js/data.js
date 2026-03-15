@@ -1,457 +1,293 @@
 /*
-  Mock data only.
-  This app is UI scaffolding for a DRI Board command center.
-  Replace these objects with live integrations to Jira/Slack/Glean/Snowflake.
+  DRI Board - Mock Data
+  NOTE: This is synthetic demo data. Replace with Jira/Glean/Snowflake integrations.
 */
 
-(function () {
-  const today = new Date();
-  const iso = (d) => new Date(d).toISOString().slice(0, 10);
-  const addDays = (n) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() + n);
-    return d;
-  };
+const DATA_VERSION = '0.1.0';
 
-  window.DRI_DATA = {
-    meta: {
-      generatedAt: new Date().toISOString(),
-      disclaimer: "Demo data only. No internal data is loaded."
-    },
+const store = {
+  snoozed: {
+    recs: new Set(JSON.parse(localStorage.getItem('snoozed_recs') || '[]')),
+    comms: new Set(JSON.parse(localStorage.getItem('snoozed_comms') || '[]')),
+    worldview: new Set(JSON.parse(localStorage.getItem('snoozed_worldview') || '[]')),
+  }
+};
 
-    initiatives: [
-      {
-        id: "DEMO-101",
-        name: "Disputes Intake Form Refresh",
-        pLevel: "P1",
-        lifecycle: "Active",
-        deadline: iso(addDays(9)),
-        description: "Refresh advocate-facing intake form to reduce missing info and decrease back-and-forth.",
-        progress: 62,
-        checklist: [
-          { id: "c1", text: "Confirm scope + requirements with Product", done: true, due: iso(addDays(2)) },
-          { id: "c2", text: "RAPID assignments confirmed", done: true, due: iso(addDays(1)) },
-          { id: "c3", text: "Training brief drafted (per playbook)", done: false, due: iso(addDays(3)) },
-          { id: "c4", text: "Comms draft ready for stakeholder review", done: false, due: iso(addDays(4)) },
-          { id: "c5", text: "Go/No-Go criteria agreed", done: false, due: iso(addDays(6)) }
-        ],
-        rapid: {
-          Recommend: "TBD",
-          Agree: "TBD",
-          Perform: "TBD",
-          Input: "TBD",
-          Decide: "TBD"
-        },
-        artifacts: [
-          { name: "Initiative brief", href: "#" },
-          { name: "Training brief", href: "#" },
-          { name: "Go/No-Go checklist", href: "#" }
-        ],
-        risks: [
-          { level: "High", text: "Training brief is missing while deadline is within 10 days." },
-          { level: "Medium", text: "Go/No-Go criteria not aligned with measurable readiness gates." }
-        ],
-        kpiImpact: null
-      },
-      {
-        id: "DEMO-204",
-        name: "Chargeback Policy Copy Update",
-        pLevel: "P2",
-        lifecycle: "Active",
-        deadline: iso(addDays(16)),
-        description: "Update knowledge base copy and macros for new chargeback wording.",
-        progress: 38,
-        checklist: [
-          { id: "c1", text: "KB article draft updated", done: true, due: iso(addDays(3)) },
-          { id: "c2", text: "QA review complete", done: false, due: iso(addDays(7)) },
-          { id: "c3", text: "BPO translation request submitted", done: false, due: iso(addDays(6)) },
-          { id: "c4", text: "Training modality confirmed", done: false, due: iso(addDays(8)) }
-        ],
-        rapid: {
-          Recommend: "TBD",
-          Agree: "TBD",
-          Perform: "TBD",
-          Input: "TBD",
-          Decide: "TBD"
-        },
-        artifacts: [{ name: "KB draft", href: "#" }],
-        risks: [{ level: "Medium", text: "Translation dependency could compress rollout window." }],
-        kpiImpact: null
-      },
-      {
-        id: "DEMO-330",
-        name: "New Escalation Path for Account Takeover",
-        pLevel: "P0",
-        lifecycle: "In Measurement",
-        deadline: iso(addDays(-4)),
-        description: "Launched new escalation routing for ATO to reduce time-to-containment.",
-        progress: 100,
-        checklist: [
-          { id: "c1", text: "Enablement session delivered", done: true, due: iso(addDays(-12)) },
-          { id: "c2", text: "Go/No-Go met", done: true, due: iso(addDays(-6)) },
-          { id: "c3", text: "30-day measurement plan started", done: true, due: iso(addDays(-4)) }
-        ],
-        rapid: {
-          Recommend: "TBD",
-          Agree: "TBD",
-          Perform: "TBD",
-          Input: "TBD",
-          Decide: "TBD"
-        },
-        artifacts: [
-          { name: "Go/No-Go record", href: "#" },
-          { name: "Training deck", href: "#" }
-        ],
-        risks: [{ level: "Low", text: "Monitor exception handling for edge cases." }],
-        kpiImpact: {
-          note: "Demo placeholder. Connect Snowflake to populate FCR/CSAT/AHT/QA trends.",
-          metrics: [
-            { name: "AHT", value: "-3%", period: "7d post" },
-            { name: "FCR", value: "+1.2 pts", period: "7d post" }
-          ]
-        }
-      },
-      {
-        id: "DEMO-412",
-        name: "Advocate Onboarding Module Refresh",
-        pLevel: "P3",
-        lifecycle: "Active",
-        deadline: iso(addDays(28)),
-        description: "Refresh L&D onboarding module to align to current tooling and policy.",
-        progress: 22,
-        checklist: [
-          { id: "c1", text: "Stakeholder map validated", done: true, due: iso(addDays(4)) },
-          { id: "c2", text: "Content outline complete", done: false, due: iso(addDays(10)) },
-          { id: "c3", text: "Comprehension assessment drafted", done: false, due: iso(addDays(14)) },
-          { id: "c4", text: "Pilot cohort scheduled", done: false, due: iso(addDays(18)) }
-        ],
-        rapid: {
-          Recommend: "TBD",
-          Agree: "TBD",
-          Perform: "TBD",
-          Input: "TBD",
-          Decide: "TBD"
-        },
-        artifacts: [{ name: "Module plan", href: "#" }],
-        risks: [{ level: "Medium", text: "Pilot date not locked. Calendar dependency." }],
-        kpiImpact: null
-      },
-      {
-        id: "DEMO-090",
-        name: "Legacy Macro Cleanup",
-        pLevel: "P3",
-        lifecycle: "Closed",
-        deadline: iso(addDays(-40)),
-        description: "Removed outdated macros and aligned tags.",
-        progress: 100,
-        checklist: [
-          { id: "c1", text: "Deprecated macros removed", done: true, due: iso(addDays(-50)) },
-          { id: "c2", text: "Advocate comms sent", done: true, due: iso(addDays(-48)) }
-        ],
-        rapid: { Recommend: "TBD", Agree: "TBD", Perform: "TBD", Input: "TBD", Decide: "TBD" },
-        artifacts: [{ name: "Change log", href: "#" }],
-        risks: [],
-        kpiImpact: null
-      }
+function persistSnoozes() {
+  localStorage.setItem('snoozed_recs', JSON.stringify([...store.snoozed.recs]));
+  localStorage.setItem('snoozed_comms', JSON.stringify([...store.snoozed.comms]));
+  localStorage.setItem('snoozed_worldview', JSON.stringify([...store.snoozed.worldview]));
+}
+
+const initiatives = [
+  {
+    id: 'OR-2412',
+    name: 'Disputes: Evidence Upload UX Change',
+    pLevel: 'P1',
+    lifecycle: 'Active',
+    deadline: '2026-03-28',
+    description: 'Update advocate readiness for new evidence upload flow. Requires comms, training delta, and go/no-go criteria.',
+    rapid: { recommend: 'Product Ops', agree: 'Quality', perform: 'L&D + Content Ops', input: 'BPO Ops', decide: 'Strategy Lead' },
+    artifacts: [
+      { type: 'Training Brief', link: '#', status: 'Draft' },
+      { type: 'Go/No-Go', link: '#', status: 'Missing' },
+      { type: 'Comms Draft', link: '#', status: 'Draft' },
     ],
-
-    comms: {
-      unreplied: [
-        {
-          id: "t-1",
-          sender: "(Demo) Content Ops Partner",
-          channel: "#readiness",
-          timestamp: "Today 9:12am",
-          preview: "Can you confirm whether DEMO-101 needs a formal go/no-go doc or a lightweight checklist?",
-          initiativeId: "DEMO-101",
-          urgency: "High"
-        },
-        {
-          id: "t-2",
-          sender: "(Demo) BPO Ops Lead",
-          channel: "#bpo-ops",
-          timestamp: "Today 10:03am",
-          preview: "We need the translation request for DEMO-204 by EOD to hit training timelines.",
-          initiativeId: "DEMO-204",
-          urgency: "High"
-        },
-        {
-          id: "t-3",
-          sender: "(Demo) Product Manager",
-          channel: "#product",
-          timestamp: "Yesterday 4:22pm",
-          preview: "RAPID roles are unclear for the escalation change follow-ups. Who is Decide?",
-          initiativeId: "DEMO-330",
-          urgency: "Medium"
-        },
-        {
-          id: "t-4",
-          sender: "(Demo) Quality Lead",
-          channel: "#quality",
-          timestamp: "Yesterday 2:11pm",
-          preview: "Any expected KPI movement for ATO escalations so we can set QA focus areas?",
-          initiativeId: "DEMO-330",
-          urgency: "Medium"
-        },
-        {
-          id: "t-5",
-          sender: "(Demo) L&D Program Manager",
-          channel: "#learning",
-          timestamp: "Monday 1:17pm",
-          preview: "For DEMO-412, do you want a pilot cohort or straight rollout to all new hires?",
-          initiativeId: "DEMO-412",
-          urgency: "Low"
-        }
-      ],
-      openThreads: [
-        {
-          id: "ot-1",
-          channel: "#readiness",
-          timestamp: "Today 8:35am",
-          newCount: 6,
-          summary: "Thread continued with questions about enablement ownership and whether a comms draft exists. Two people suggested moving deadline forward.",
-          initiativeId: "DEMO-101"
-        },
-        {
-          id: "ot-2",
-          channel: "#bpo-ops",
-          timestamp: "Yesterday 6:10pm",
-          newCount: 3,
-          summary: "Ops asked for translation timelines and requested a single point of contact for approvals. No decision yet.",
-          initiativeId: "DEMO-204"
-        },
-        {
-          id: "ot-3",
-          channel: "#quality",
-          timestamp: "Yesterday 12:05pm",
-          newCount: 2,
-          summary: "QA discussed new failure modes to monitor and asked for a short measurement plan. Someone proposed 7-day leading indicators.",
-          initiativeId: "DEMO-330"
-        }
-      ],
-      proactive: [
-        {
-          id: "p-1",
-          channel: "#product",
-          timestamp: "Today 9:48am",
-          confidence: "High",
-          signal: "RAPID violation",
-          talkingPoint: "I can confirm RAPID and lock Decide/Agree today so delivery is unblocked.",
-          initiativeId: "DEMO-101",
-          context: "Decision being discussed without the readiness DRI included."
-        },
-        {
-          id: "p-2",
-          channel: "#bpo-ops",
-          timestamp: "Today 10:22am",
-          confidence: "Medium-High",
-          signal: "Scope intersection",
-          talkingPoint: "I will draft the training brief and translation request today and attach it to the Jira ticket.",
-          initiativeId: "DEMO-204",
-          context: "Readiness/training timeline risk for BPO sites."
-        },
-        {
-          id: "p-3",
-          channel: "#quality",
-          timestamp: "Yesterday 3:19pm",
-          confidence: "Medium",
-          signal: "Question-answer match",
-          talkingPoint: "We should align QA focus to the top 3 new error states and define abort triggers for measurement.",
-          initiativeId: "DEMO-330",
-          context: "QA planning question in readiness domain."
-        },
-        {
-          id: "p-4",
-          channel: "#learning",
-          timestamp: "Monday 11:10am",
-          confidence: "Low",
-          signal: "Stakeholder signal",
-          talkingPoint: "If helpful, I can propose a pilot plan with success criteria and a rollout gate.",
-          initiativeId: "DEMO-412",
-          context: "Collaborator engagement detected in relevant topic."
-        }
-      ]
-    },
-
-    collaborators: [
-      {
-        id: "col-1",
-        tierOrg: "Content Operations",
-        tierRole: "Content Partner",
-        name: "(Demo) Content Partner",
-        state: "Cooling",
-        composite: 3.1,
-        dims: {
-          Responsiveness: 2.9,
-          EngagementDepth: 3.0,
-          Proactivity: 3.2,
-          Reliability: 3.4,
-          ToneAlignment: 3.1
-        },
-        action: "Send a concrete ask with a deadline and attach the draft artifact for fast review. Offer two options to choose from."
-      },
-      {
-        id: "col-2",
-        tierOrg: "BPO Partners",
-        tierRole: "BPO Ops Lead",
-        name: "(Demo) BPO Ops Lead",
-        state: "Drifting",
-        composite: 2.3,
-        dims: {
-          Responsiveness: 2.2,
-          EngagementDepth: 2.4,
-          Proactivity: 2.1,
-          Reliability: 2.6,
-          ToneAlignment: 2.4
-        },
-        action: "Provide a single page timeline (dates, owners, decisions needed). Ask for their top 2 constraints and confirm the approval path."
-      },
-      {
-        id: "col-3",
-        tierOrg: "Quality",
-        tierRole: "Quality Lead",
-        name: "(Demo) Quality Lead",
-        state: "Stable",
-        composite: 4.0,
-        dims: {
-          Responsiveness: 4.1,
-          EngagementDepth: 3.8,
-          Proactivity: 3.9,
-          Reliability: 4.2,
-          ToneAlignment: 4.0
-        },
-        action: "Keep looped in via a short weekly update that ties readiness work to measurement outcomes."
-      },
-      {
-        id: "col-4",
-        tierOrg: "L&D",
-        tierRole: "L&D Program Manager",
-        name: "(Demo) L&D Program Manager",
-        state: "Strong",
-        composite: 4.7,
-        dims: {
-          Responsiveness: 4.8,
-          EngagementDepth: 4.6,
-          Proactivity: 4.7,
-          Reliability: 4.7,
-          ToneAlignment: 4.8
-        },
-        action: "Delegate content production and align on pilot success criteria early."
-      }
-    ],
-
-    worldview: [
-      {
-        id: "wv-1",
-        type: "Regulatory",
-        title: "Demo: Regulatory monitoring item",
-        summary: "Placeholder for external updates. Wire this to a web search feed and tag to relevant initiatives.",
-        relevance: "DEMO-330",
-        soWhat: "If new guidance affects escalation or dispute handling, update enablement and QA focus before measurement window ends."
-      },
-      {
-        id: "wv-2",
-        type: "Competitive",
-        title: "Demo: Competitor CX move",
-        summary: "Placeholder for competitive intelligence and how it may shift customer expectations.",
-        relevance: "DEMO-101",
-        soWhat: "If competitors simplify dispute intake, prioritize clarity and reduce customer effort in the new form design."
-      },
-      {
-        id: "wv-3",
-        type: "Innovation",
-        title: "Demo: Contact center automation trend",
-        summary: "Placeholder for AI automation signals and operational implications.",
-        relevance: "DEMO-204",
-        soWhat: "If macros/KB can be auto-suggested, ensure updated policy copy is consistent to avoid model drift."
-      },
-      {
-        id: "wv-4",
-        type: "Trends",
-        title: "Demo: Industry metric benchmarking",
-        summary: "Placeholder for industry KPI trend or benchmark.",
-        relevance: "DEMO-412",
-        soWhat: "Align onboarding comprehension checks to the behaviors that predict early advocate success."
-      }
-    ],
-
-    recommender: [
-      {
-        id: "rec-1",
-        title: "Training brief missing for DEMO-101",
-        whyNow: "Deadline within 10 days and checklist shows training brief incomplete.",
-        effort: "~30 min with AI assist",
-        trigger: "Deadline proximity + incomplete checklist",
-        initiativeId: "DEMO-101"
-      },
-      {
-        id: "rec-2",
-        title: "Confirm RAPID roles for DEMO-101",
-        whyNow: "Slack indicates RAPID confusion. Unblocks decisions and prevents drift.",
-        effort: "~15 min",
-        trigger: "RAPID completeness",
-        initiativeId: "DEMO-101"
-      },
-      {
-        id: "rec-3",
-        title: "Create translation request packet for DEMO-204",
-        whyNow: "BPO dependency risks compressing training window.",
-        effort: "~20 min",
-        trigger: "Dependency pressure",
-        initiativeId: "DEMO-204"
-      },
-      {
-        id: "rec-4",
-        title: "Measurement mini-brief for DEMO-330",
-        whyNow: "In Measurement. QA asked for expected movement and abort triggers.",
-        effort: "~25 min",
-        trigger: "Measurement window",
-        initiativeId: "DEMO-330"
-      }
-    ],
-
-    wins: [
-      {
-        id: "w-1",
-        title: "ATO escalation routing launched on time (demo)",
-        desc: "Shipped routing change and entered measurement with defined leading indicators.",
-        comp: "operational",
-        evidence: "DEMO-330",
-        when: "This month"
-      },
-      {
-        id: "w-2",
-        title: "Improved cross-functional alignment (demo)",
-        desc: "Locked stakeholder review path and reduced handoffs for a readiness artifact.",
-        comp: "cross-func",
-        evidence: "DEMO-101",
-        when: "This month"
-      }
-    ],
-
-    decisions: [
-      {
-        id: "d-1",
-        type: "Go/No-Go",
-        title: "Go decision for DEMO-330",
-        body: "Decision captured as demo placeholder. Replace with your real decision record.",
-        tenet: "(Playbook) Tenet alignment placeholder",
-        expected: "Reduce time-to-containment",
-        actual: "Pending measurement",
-        when: "Last week",
-        initiativeId: "DEMO-330"
-      },
-      {
-        id: "d-2",
-        type: "P-Level Classification",
-        title: "Classified DEMO-101 as P1",
-        body: "Rationale placeholder. Replace with playbook-based rationale.",
-        tenet: "(Playbook) Prioritization framework placeholder",
-        expected: "Improve intake completeness",
-        actual: "Pending",
-        when: "This week",
-        initiativeId: "DEMO-101"
-      }
+    kpiImpact: null,
+    checklist: [
+      { id: 'c1', text: 'Confirm P-level label on Jira epic', done: true, due: '2026-03-18' },
+      { id: 'c2', text: 'RAPID assignments confirmed in Jira', done: false, due: '2026-03-18' },
+      { id: 'c3', text: 'Training delta doc approved by L&D', done: false, due: '2026-03-22' },
+      { id: 'c4', text: 'BPO translation request submitted', done: true, due: '2026-03-20' },
+      { id: 'c5', text: 'Go/No-Go checklist drafted (8-10 criteria)', done: false, due: '2026-03-23' },
     ]
-  };
-})();
+  },
+  {
+    id: 'OR-2399',
+    name: 'Banking: Savings Rate Tier Update',
+    pLevel: 'P0',
+    lifecycle: 'Active',
+    deadline: '2026-03-21',
+    description: 'Advocate readiness for Savings rate tier change and customer comms alignment.',
+    rapid: { recommend: 'PM', agree: 'Legal', perform: 'Content Ops', input: 'Support Ops', decide: 'Strategy Lead' },
+    artifacts: [
+      { type: 'Stakeholder Map', link: '#', status: 'Complete' },
+      { type: 'Training Brief', link: '#', status: 'Complete' },
+      { type: 'Measurement Plan', link: '#', status: 'Draft' },
+    ],
+    kpiImpact: null,
+    checklist: [
+      { id: 'c1', text: 'Confirm launch date with Product and Marketing', done: true, due: '2026-03-15' },
+      { id: 'c2', text: 'Finalize customer-facing FAQ alignment', done: false, due: '2026-03-18' },
+      { id: 'c3', text: 'Deliver training to BPO sites', done: false, due: '2026-03-19' },
+      { id: 'c4', text: 'Pre-read sent 48h before forum', done: false, due: '2026-03-17' },
+    ]
+  },
+  {
+    id: 'OR-2333',
+    name: 'Quality Rubric Refresh: Fraud LOB',
+    pLevel: 'P2',
+    lifecycle: 'In Measurement',
+    deadline: '2026-03-05',
+    description: 'Shipped rubric update; tracking 30-day KPI movement and advocate comprehension.',
+    rapid: { recommend: 'Quality', agree: 'Support Ops', perform: 'Quality', input: 'BPO Ops', decide: 'Strategy Lead' },
+    artifacts: [
+      { type: 'Rubric v3', link: '#', status: 'Complete' },
+      { type: 'Training Completion Report', link: '#', status: 'Complete' },
+    ],
+    kpiImpact: { fcr: '+1.2pp', csat: '+0.3', qa: '+2.1pp' },
+    checklist: [
+      { id: 'c1', text: '7-day leading indicators reviewed', done: true, due: '2026-02-20' },
+      { id: 'c2', text: '30-day lagging window ends', done: false, due: '2026-03-22' },
+    ]
+  },
+  {
+    id: 'OR-2404',
+    name: 'Content Ops: Macro Deprecation Cleanup',
+    pLevel: 'P3',
+    lifecycle: 'Active',
+    deadline: '2026-04-10',
+    description: 'Retire outdated macros and refresh internal KB entries. Ensure no coverage gaps.',
+    rapid: { recommend: 'Content Ops', agree: 'Quality', perform: 'Content Ops', input: 'BPO Leads', decide: 'Strategy Lead' },
+    artifacts: [
+      { type: 'KB Audit', link: '#', status: 'Draft' },
+    ],
+    kpiImpact: null,
+    checklist: [
+      { id: 'c1', text: 'Identify deprecated macros list', done: true, due: '2026-03-12' },
+      { id: 'c2', text: 'Validate coverage with QA calibrations', done: false, due: '2026-03-25' },
+      { id: 'c3', text: 'Publish updated KB and retire macros', done: false, due: '2026-04-05' },
+    ]
+  },
+  {
+    id: 'OR-2290',
+    name: 'Advocate Ramp: New Hire Path v2',
+    pLevel: 'P2',
+    lifecycle: 'Closed',
+    deadline: '2026-02-01',
+    description: 'Closed: updated ramp curriculum and assessment flow.',
+    rapid: { recommend: 'L&D', agree: 'Support Ops', perform: 'L&D', input: 'BPO Ops', decide: 'Strategy Lead' },
+    artifacts: [],
+    kpiImpact: { rampTime: '-3.5 days', qa: '+1.0pp' },
+    checklist: []
+  },
+];
+
+const actionsDueToday = [
+  { id: 'a1', title: 'Send pre-read for Readiness Governance forum', sub: 'Due today 3:00 PM', pLevel: 'P0', initiativeId: 'OR-2399' },
+  { id: 'a2', title: 'Confirm RAPID in Jira for Disputes change', sub: 'Awaiting inputs', pLevel: 'P1', initiativeId: 'OR-2412' },
+  { id: 'a3', title: 'Draft Go/No-Go checklist (8-10 criteria)', sub: 'Attach to OR-2412', pLevel: 'P1', initiativeId: 'OR-2412' },
+];
+
+const comms = {
+  unreplied: [
+    { id: 'm1', sender: 'BPO Ops Lead', channel: '#support-disputes', ts: 'Today 9:14 AM', preview: 'Do we have the final customer-facing guidance for evidence upload yet?', initiativeId: 'OR-2412', urgency: 'High' },
+    { id: 'm2', sender: 'Quality Manager', channel: '#qa-calibration', ts: 'Today 8:31 AM', preview: 'Need your agree on the updated exception handling language before EOD.', initiativeId: 'OR-2399', urgency: 'High' },
+    { id: 'm3', sender: 'Content Partner', channel: '#content-ops', ts: 'Yesterday 6:05 PM', preview: 'Can you confirm which macros are safe to deprecate this sprint?', initiativeId: 'OR-2404', urgency: 'Medium' },
+    { id: 'm4', sender: 'PM', channel: '#banking-product', ts: 'Yesterday 5:20 PM', preview: 'Marketing asked whether this rate tier change impacts disclosures.', initiativeId: 'OR-2399', urgency: 'High' },
+    { id: 'm5', sender: 'Training Lead', channel: '#ld', ts: 'Yesterday 2:10 PM', preview: 'We need success criteria for the training module. Can you define them?', initiativeId: 'OR-2412', urgency: 'Medium' },
+  ],
+  openThreads: [
+    { id: 't1', sender: 'Support Ops', channel: '#support-ops', ts: 'Today 10:02 AM', newCount: 4, summary: 'Team aligned on moving the deadline up by 2 days. Open question: who owns the final comms sign-off.', initiativeId: 'OR-2399', decisionMade: true },
+    { id: 't2', sender: 'Quality', channel: '#qa-calibration', ts: 'Today 9:40 AM', newCount: 2, summary: 'New QA scoring nuance proposed for edge cases. Needs Decide confirmation before rollout.', initiativeId: 'OR-2333', decisionMade: false },
+    { id: 't3', sender: 'BPO Lead', channel: '#bpo-manila', ts: 'Yesterday 4:55 PM', newCount: 1, summary: 'Translation capacity constraint flagged. Proposed a split delivery for training assets.', initiativeId: 'OR-2412', decisionMade: false },
+  ],
+  proactive: [
+    { id: 'p1', confidence: 'HIGH', signal: 'RAPID violation', talkingPoint: 'You hold Decide. Ask for options and confirm decision deadline.', channel: '#support-ops', ts: 'Today 9:58 AM', initiativeId: 'OR-2399', preview: 'Thread discussing go/no-go criteria without Decide role included.' },
+    { id: 'p2', confidence: 'MEDIUM-HIGH', signal: 'Scope intersection', talkingPoint: 'Offer a readiness checklist and training modality recommendation.', channel: '#banking-product', ts: 'Yesterday 3:12 PM', initiativeId: 'OR-2399', preview: 'Thread about launch comms sequencing and advocate enablement timing.' },
+    { id: 'p3', confidence: 'MEDIUM', signal: 'Question-answer match', talkingPoint: 'Answer with required artifacts and measurement plan baseline.', channel: '#support-disputes', ts: 'Yesterday 1:30 PM', initiativeId: 'OR-2412', preview: 'Question: what artifacts are mandatory for a P1 change?' },
+    { id: 'p4', confidence: 'LOW', signal: 'Stakeholder signal', talkingPoint: 'FYI only: monitored collaborator engaged; no action needed unless asked.', channel: '#content-ops', ts: 'Yesterday 11:05 AM', initiativeId: 'OR-2404', preview: 'Content partner discussing macro cleanup scheduling.' },
+  ]
+};
+
+const collaborators = [
+  {
+    id: 'col1', tier: { org: 'Content Operations', role: 'Content Partner', individual: 'Content Partner (LND-1638)' },
+    state: 'Cooling',
+    composite: 3.1,
+    dims: { responsiveness: 2.8, engagement: 3.0, proactivity: 2.9, reliability: 3.5, tone: 3.2 },
+    recommendation: 'Send a concrete ask with a tight decision window and attach the latest draft for async review.'
+  },
+  {
+    id: 'col2', tier: { org: 'BPO', role: 'BPO Ops Lead (Disputes)', individual: 'BPO Ops Lead (Disputes)' },
+    state: 'Drifting',
+    composite: 2.3,
+    dims: { responsiveness: 2.0, engagement: 2.4, proactivity: 2.1, reliability: 2.6, tone: 2.5 },
+    recommendation: 'Offer a fast unblock: confirm what you need from them and propose a 15-minute alignment slot.'
+  },
+  {
+    id: 'col3', tier: { org: 'Quality', role: 'Quality Manager', individual: 'Quality Manager' },
+    state: 'Stable',
+    composite: 4.1,
+    dims: { responsiveness: 4.2, engagement: 4.0, proactivity: 3.9, reliability: 4.4, tone: 4.1 },
+    recommendation: null
+  },
+  {
+    id: 'col4', tier: { org: 'Product', role: 'PM', individual: 'PM' },
+    state: 'Strong',
+    composite: 4.6,
+    dims: { responsiveness: 4.7, engagement: 4.6, proactivity: 4.5, reliability: 4.6, tone: 4.6 },
+    recommendation: null
+  },
+  {
+    id: 'col5', tier: { org: 'L&D', role: 'Training Lead', individual: 'Training Lead' },
+    state: 'Stable',
+    composite: 3.9,
+    dims: { responsiveness: 3.8, engagement: 4.0, proactivity: 3.7, reliability: 4.1, tone: 3.9 },
+    recommendation: null
+  },
+];
+
+const worldviewItems = [
+  {
+    id: 'w1', type: 'Competitive', title: 'Competitor expands instant dispute resolution experience',
+    summary: 'Multiple fintech peers are reducing dispute handling time by shifting evidence collection earlier in the flow and adding in-app status tracking.',
+    relevance: 'OR-2412', soWhat: 'Ensure advocate macros and scripts reflect new customer expectations around status transparency and timelines.'
+  },
+  {
+    id: 'w2', type: 'Regulatory', title: 'CFPB signals increased scrutiny on complaint handling timelines',
+    summary: 'Recent public statements indicate closer monitoring of complaint handling and dispute resolution practices, especially around clarity and timeliness.',
+    relevance: 'OR-2412', soWhat: 'Add explicit timeline language to training and go/no-go criteria; validate legal review is captured in RAPID.'
+  },
+  {
+    id: 'w3', type: 'Innovation', title: 'Contact centers adopting AI for guided workflows rather than free-form answers',
+    summary: 'Industry trend favors structured decision trees integrated into tooling to reduce variance and improve QA outcomes.',
+    relevance: 'OR-2404', soWhat: 'Use the macro cleanup to rationalize guided flows: remove duplicates, standardize decision points, and align to QA rubric.'
+  },
+  {
+    id: 'w4', type: 'Trends', title: 'Training programs emphasize microlearning with measurable comprehension checks',
+    summary: 'Short modules with targeted assessments outperform long sessions, especially for policy changes with high error cost.',
+    relevance: 'OR-2399', soWhat: 'Convert rate-tier updates into a 10-minute microlearning plus 5-question check; set abort triggers if scores drop.'
+  }
+];
+
+const recommendations = [
+  {
+    id: 'r1', title: 'Draft Go/No-Go checklist for OR-2412',
+    whyNow: 'Deadline proximity + missing required artifact',
+    tenet: 'Artifact completeness for P1 changes',
+    effort: '20-30 min with AI assist',
+    initiativeId: 'OR-2412'
+  },
+  {
+    id: 'r2', title: 'Send pre-read for governance forum',
+    whyNow: 'Meeting approaching without pre-read',
+    tenet: 'No surprises in governance',
+    effort: '10 min',
+    initiativeId: 'OR-2399'
+  },
+  {
+    id: 'r3', title: 'Intervene with drifting collaborator (BPO Ops Lead - Disputes)',
+    whyNow: 'Sentiment drifting 7+ days',
+    tenet: 'Escalate early, unblock fast',
+    effort: '5-10 min',
+    initiativeId: 'OR-2412'
+  },
+  {
+    id: 'r4', title: 'Add measurement abort triggers for Savings rate tier update',
+    whyNow: 'P0 change missing clear abort triggers',
+    tenet: 'Measurement plan required for launch-risk items',
+    effort: '15-20 min',
+    initiativeId: 'OR-2399'
+  },
+];
+
+const wins = [
+  {
+    id: 'win1', title: 'Closed New Hire Path v2 with ramp time reduction',
+    desc: 'Delivered ramp curriculum refresh and assessment flow updates. Documented impact and archived artifacts.',
+    comp: 'drive-results', evidence: 'Jira: OR-2290', date: '2026-02-02'
+  },
+  {
+    id: 'win2', title: 'Quality rubric refresh shipped with QA lift',
+    desc: 'Aligned rubric v3, ran calibrations, and monitored early KPI signals in measurement window.',
+    comp: 'data-acumen', evidence: 'Jira: OR-2333', date: '2026-03-01'
+  }
+];
+
+const decisions = [
+  {
+    id: 'd1', type: 'p-level', title: 'Classified Savings rate tier update as P0',
+    decidedAt: '2026-03-10',
+    details: 'Rationale: customer-impacting financial change with marketing push. Required accelerated training and comms coverage. Tenet: match urgency to P-level.'
+  },
+  {
+    id: 'd2', type: 'resource', title: 'Allocated Content Ops capacity to macro cleanup after launch tasks',
+    decidedAt: '2026-03-08',
+    details: 'Tradeoff: reduced throughput on cleanup to avoid launch risk. Expected outcome: no readiness gaps for P0/P1 items.'
+  }
+];
+
+function daysUntil(dateStr) {
+  const now = new Date();
+  const d = new Date(dateStr + 'T00:00:00');
+  const ms = d - new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.ceil(ms / (1000 * 60 * 60 * 24));
+}
+
+function pWeight(p) {
+  if (p === 'P0') return 3;
+  if (p === 'P1') return 2;
+  if (p === 'P2') return 1.5;
+  return 1;
+}
+
+function calcInitiativeProgress(init) {
+  if (!init.checklist || init.checklist.length === 0) return 0;
+  const done = init.checklist.filter(c => c.done).length;
+  return Math.round((done / init.checklist.length) * 100);
+}
+
+function calcOverallReadiness(activeOnly = true) {
+  const items = initiatives.filter(i => (activeOnly ? (i.lifecycle === 'Active') : true));
+  let totalW = 0;
+  let sum = 0;
+  for (const i of items) {
+    const w = pWeight(i.pLevel);
+    const prog = calcInitiativeProgress(i);
+    totalW += w;
+    sum += prog * w;
+  }
+  if (!totalW) return 0;
+  return Math.round(sum / totalW);
+}

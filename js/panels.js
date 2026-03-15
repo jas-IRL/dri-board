@@ -1,1394 +1,904 @@
-/* Panel rendering + UI actions */
+/*
+  DRI Board - Panel Renderers
+  This is a front-end prototype using mock data in data.js.
+*/
 
-(function () {
-  const $ = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+function formatLifecycle(lifecycle) {
+  if (lifecycle === 'In Measurement') return { cls: 'measuring', label: 'In Measurement' };
+  if (lifecycle === 'Closed') return { cls: 'closed', label: 'Closed' };
+  if (lifecycle === 'Paused') return { cls: 'paused', label: 'Paused' };
+  return { cls: 'active', label: 'Active' };
+}
 
-  const SNOOZE_KEY = "dri_board_snoozed_v1";
+function pClass(p) {
+  return (p || '').toLowerCase();
+}
 
-  function escapeHtml(s) {
-    return String(s)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
+function progressColor(pct) {
+  if (pct >= 80) return 'green';
+  if (pct >= 55) return 'blue';
+  if (pct >= 35) return 'yellow';
+  return 'red';
+}
+
+function renderMissionControl() {
+  // Readiness ring
+  const readiness = calcOverallReadiness(true);
+  const ring = qs('#readiness-ring-fill');
+  const value = qs('#readiness-value');
+  if (value) value.textContent = `${readiness}%`;
+  if (ring) {
+    const circumference = 2 * Math.PI * 52;
+    const offset = circumference * (1 - readiness / 100);
+    ring.style.strokeDasharray = `${circumference.toFixed(1)}`;
+    ring.style.strokeDashoffset = `${offset.toFixed(1)}`;
   }
 
-  function parseDateISO(iso) {
-    const d = new Date(iso + "T00:00:00");
-    return Number.isNaN(d.getTime()) ? null : d;
+  // Quick stats
+  const activeCount = initiatives.filter(i => i.lifecycle === 'Active').length;
+  const measuringCount = initiatives.filter(i => i.lifecycle === 'In Measurement').length;
+  const atRiskCount = collaborators.filter(c => ['Cooling', 'Drifting', 'Strained'].includes(c.state)).length;
+  const unrepliedCount = comms.unreplied.filter(m => !store.snoozed.comms.has(m.id)).length;
+  qs('#stat-active').textContent = `${activeCount}`;
+  qs('#stat-measuring').textContent = `${measuringCount}`;
+  qs('#stat-atrisk').textContent = `${atRiskCount}`;
+  qs('#stat-unreplied').textContent = `${unrepliedCount}`;
+
+  // Actions list
+  const actionsList = qs('#actions-list');
+  const visibleActions = actionsDueToday.slice(0, 6);
+  qs('#actions-count').textContent = `${visibleActions.length}`;
+  actionsList.innerHTML = visibleActions.map(a => `
+    <li class="action-item">
+      <div class="action-meta">
+        <div class="action-title truncate">${escapeHtml(a.title)}</div>
+        <div class="action-sub">${escapeHtml(a.sub)} · <span class="text-muted">${escapeHtml(a.initiativeId)}</span></div>
+      </div>
+      <span class="p-badge ${pClass(a.pLevel)}">${escapeHtml(a.pLevel)}</span>
+    </li>
+  `).join('');
+
+  // Checklist top items: pick incomplete, sort by P-level then deadline
+  const pOrder = { P0: 0, P1: 1, P2: 2, P3: 3 };
+  const items = [];
+  initiatives.filter(i => i.lifecycle === 'Active').forEach(init => {
+    init.checklist?.filter(c => !c.done).forEach(c => items.push({
+      initId: init.id,
+      initName: init.name,
+      pLevel: init.pLevel,
+      due: c.due,
+      text: c.text
+    }));
+  });
+
+  items.sort((a, b) => {
+    const po = (pOrder[a.pLevel] ?? 9) - (pOrder[b.pLevel] ?? 9);
+    if (po !== 0) return po;
+    return new Date(a.due) - new Date(b.due);
+  });
+
+  const checklistEl = qs('#mc-checklist');
+  checklistEl.innerHTML = items.slice(0, 7).map(it => `
+    <li class="checklist-item">
+      <div class="checklist-meta">
+        <div class="checklist-title truncate">${escapeHtml(it.text)}</div>
+        <div class="checklist-sub">${escapeHtml(it.initId)} · due ${escapeHtml(it.due)} (${daysUntil(it.due)}d)</div>
+      </div>
+      <span class="p-badge ${pClass(it.pLevel)}">${escapeHtml(it.pLevel)}</span>
+    </li>
+  `).join('');
+
+  // Urgent recommendations
+  const mcRecs = qs('#mc-recs');
+  const visibleRecs = recommendations.filter(r => !store.snoozed.recs.has(r.id)).slice(0, 3);
+  mcRecs.innerHTML = visibleRecs.map(r => `
+    <div class="rec-card">
+      <div class="rec-title">${escapeHtml(r.title)}</div>
+      <div class="rec-why">Why now: ${escapeHtml(r.whyNow)} · Tenet: ${escapeHtml(r.tenet)}</div>
+      <div class="rec-actions">
+        <button class="btn btn-primary btn-sm" data-gen-rec="${escapeHtml(r.id)}"><i class="fas fa-bolt"></i> Generate</button>
+        <button class="btn btn-secondary btn-sm" data-snooze-rec="${escapeHtml(r.id)}"><i class="fas fa-clock"></i> Not Relevant</button>
+      </div>
+    </div>
+  `).join('');
+
+  qsa('[data-snooze-rec]').forEach(btn => {
+    btn.onclick = () => snooze('rec', btn.getAttribute('data-snooze-rec'));
+  });
+  qsa('[data-gen-rec]').forEach(btn => {
+    btn.onclick = () => alert('Demo: “Generate” would produce an artifact and attach it to Jira.');
+  });
+
+  // Collab alerts
+  const alerts = qs('#mc-collab-alerts');
+  const atRisk = collaborators.filter(c => ['Cooling', 'Drifting', 'Strained'].includes(c.state));
+  alerts.innerHTML = atRisk.map(c => `
+    <div class="collab-alert">
+      <div class="flex justify-between items-center gap-12">
+        <div>
+          <div style="font-weight:800">${escapeHtml(c.tier.role)}</div>
+          <div class="text-muted" style="font-size:0.8rem">${escapeHtml(c.tier.org)}</div>
+        </div>
+        <span class="sentiment-badge ${c.state.toLowerCase()}">${escapeHtml(c.state)}</span>
+      </div>
+      <div class="text-secondary" style="font-size:0.85rem; line-height:1.35">Recommended action: ${escapeHtml(c.recommendation || '')}</div>
+      <div class="rec-actions">
+        <button class="btn btn-secondary btn-sm" data-draft-reengage="${escapeHtml(c.id)}"><i class="fas fa-pen"></i> Draft Message</button>
+      </div>
+    </div>
+  `).join('');
+
+  qsa('[data-draft-reengage]').forEach(btn => {
+    btn.onclick = () => {
+      alert('Demo: drafts a re-engagement message that leads with an unblock and a clear ask.');
+    };
+  });
+}
+
+function renderWorkstreams() {
+  const list = qs('#workstream-list');
+  const filter = qs('#workstreams .filter-btn.active')?.getAttribute('data-filter') || 'active-measuring';
+  const sort = qs('#ws-sort')?.value || 'priority';
+
+  let items = [...initiatives];
+  if (filter === 'active-measuring') {
+    items = items.filter(i => ['Active', 'In Measurement'].includes(i.lifecycle));
   }
 
-  function daysUntil(iso) {
-    const d = parseDateISO(iso);
-    if (!d) return null;
-    const now = new Date();
-    const ms = d.getTime() - new Date(now.toDateString()).getTime();
-    return Math.round(ms / (1000 * 60 * 60 * 24));
-  }
+  const pOrder = { P0: 0, P1: 1, P2: 2, P3: 3 };
+  items.sort((a, b) => {
+    if (sort === 'deadline') return new Date(a.deadline) - new Date(b.deadline);
+    if (sort === 'progress') return calcInitiativeProgress(b) - calcInitiativeProgress(a);
+    return (pOrder[a.pLevel] ?? 9) - (pOrder[b.pLevel] ?? 9);
+  });
 
-  function pWeight(p) {
-    if (p === "P0") return 3;
-    if (p === "P1") return 2;
-    if (p === "P2") return 1.5;
-    return 1;
-  }
+  list.innerHTML = items.map(init => {
+    const prog = calcInitiativeProgress(init);
+    const lc = formatLifecycle(init.lifecycle);
+    const riskSignals = deriveRisks(init);
 
-  function pClass(p) {
-    return (p || "P3").toLowerCase();
-  }
-
-  function lifecycleClass(l) {
-    const x = (l || "Active").toLowerCase();
-    if (x.includes("measurement")) return "measuring";
-    return x;
-  }
-
-  function progressColor(n) {
-    if (n >= 80) return "green";
-    if (n >= 50) return "blue";
-    if (n >= 30) return "yellow";
-    return "red";
-  }
-
-  function loadSnoozed() {
-    try {
-      return JSON.parse(localStorage.getItem(SNOOZE_KEY) || "{}") || {};
-    } catch {
-      return {};
-    }
-  }
-
-  function saveSnoozed(next) {
-    localStorage.setItem(SNOOZE_KEY, JSON.stringify(next));
-  }
-
-  function snooze(kind, id) {
-    const current = loadSnoozed();
-    const key = `${kind}:${id}`;
-    current[key] = { snoozedAt: new Date().toISOString() };
-    saveSnoozed(current);
-  }
-
-  function isSnoozed(kind, id) {
-    const current = loadSnoozed();
-    return Boolean(current[`${kind}:${id}`]);
-  }
-
-  function ringSetPercent(svgCircle, percent) {
-    // circumference for r=52: ~326.7
-    const c = 327;
-    const clamped = Math.max(0, Math.min(100, percent));
-    const offset = c - (clamped / 100) * c;
-    svgCircle.style.strokeDashoffset = String(offset);
-
-    // color
-    if (clamped >= 80) svgCircle.style.stroke = "var(--accent-green)";
-    else if (clamped >= 60) svgCircle.style.stroke = "var(--accent-blue)";
-    else if (clamped >= 40) svgCircle.style.stroke = "var(--accent-yellow)";
-    else svgCircle.style.stroke = "var(--accent-red)";
-  }
-
-  function computeOverallReadiness(initiatives) {
-    // readiness = weighted avg progress of Active initiatives only
-    const active = initiatives.filter((i) => i.lifecycle === "Active");
-    let num = 0;
-    let den = 0;
-    for (const i of active) {
-      const w = pWeight(i.pLevel);
-      num += (i.progress || 0) * w;
-      den += w;
-    }
-    if (!den) return 0;
-    return Math.round(num / den);
-  }
-
-  function renderMissionControl(data) {
-    const initiatives = data.initiatives || [];
-    const active = initiatives.filter((i) => i.lifecycle === "Active");
-    const measuring = initiatives.filter((i) => i.lifecycle === "In Measurement");
-
-    // readiness ring
-    const readiness = computeOverallReadiness(initiatives);
-    $("#readiness-value").textContent = `${readiness}%`;
-    ringSetPercent($("#readiness-ring-fill"), readiness);
-
-    // stats
-    $("#stat-active").textContent = String(active.length);
-    $("#stat-measuring").textContent = String(measuring.length);
-
-    // at-risk collabs (cooling/drifting/strained)
-    const atRisk = (data.collaborators || []).filter((c) => ["Cooling", "Drifting", "Strained"].includes(c.state));
-    $("#stat-atrisk").textContent = String(atRisk.length);
-
-    // unreplied mentions count (non-snoozed)
-    const unreplied = (data.comms?.unreplied || []).filter((t) => !isSnoozed("comms", t.id));
-    $("#stat-unreplied").textContent = String(unreplied.length);
-
-    // actions due today (from checklist due today and not done)
-    const todayISO = new Date().toISOString().slice(0, 10);
-    const actions = [];
-    for (const i of active) {
-      for (const c of i.checklist || []) {
-        if (!c.done && c.due === todayISO) {
-          actions.push({ initiativeId: i.id, pLevel: i.pLevel, text: c.text, due: c.due });
-        }
-      }
-    }
-
-    // fallback actions (demo)
-    if (actions.length === 0) {
-      actions.push(
-        { initiativeId: "DEMO-101", pLevel: "P1", text: "Draft training brief and attach to Jira ticket", due: todayISO },
-        { initiativeId: "DEMO-204", pLevel: "P2", text: "Submit translation request packet", due: todayISO },
-        { initiativeId: "DEMO-330", pLevel: "P0", text: "Send measurement mini-brief to QA", due: todayISO }
-      );
-    }
-
-    $("#actions-count").textContent = String(actions.length);
-    const actionsList = $("#actions-list");
-    actionsList.innerHTML = actions
-      .slice(0, 6)
-      .map(
-        (a) => `
-          <li class="action-item">
-            <i class="fas fa-circle-exclamation"></i>
-            <div class="action-main">
-              <div class="action-title">${escapeHtml(a.text)}</div>
-              <div class="action-meta">
-                <span class="p-badge ${pClass(a.pLevel)}">${escapeHtml(a.pLevel)}</span>
-                <span>${escapeHtml(a.initiativeId)}</span>
-                <span>Due ${escapeHtml(a.due)}</span>
-              </div>
-            </div>
-            <button class="btn btn-sm btn-secondary" data-jump="${escapeHtml(a.initiativeId)}">Open</button>
-          </li>
-        `
-      )
-      .join("");
-
-    actionsList.querySelectorAll("button[data-jump]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        window.DRI_APP.setPanel("workstreams");
-        window.dispatchEvent(new CustomEvent("dri:focus-initiative", { detail: { id: btn.dataset.jump } }));
-      });
-    });
-
-    // Top checklist items (5-7 incomplete across Active)
-    const incomplete = [];
-    for (const i of active) {
-      for (const c of i.checklist || []) {
-        if (!c.done) {
-          incomplete.push({
-            initiativeId: i.id,
-            initiativeName: i.name,
-            pLevel: i.pLevel,
-            due: c.due,
-            text: c.text,
-            days: typeof c.due === "string" ? daysUntil(c.due) : null
-          });
-        }
-      }
-    }
-
-    incomplete.sort((a, b) => {
-      const pw = (x) => ({ P0: 0, P1: 1, P2: 2, P3: 3 }[x.pLevel] ?? 9);
-      const pComp = pw(a) - pw(b);
-      if (pComp !== 0) return pComp;
-      const da = a.days ?? 999;
-      const db = b.days ?? 999;
-      return da - db;
-    });
-
-    const checklist = $("#mc-checklist");
-    checklist.innerHTML = incomplete
-      .slice(0, 7)
-      .map(
-        (c) => `
-        <li class="checklist-item">
-          <i class="far fa-circle"></i>
-          <div class="check-main">
-            <div class="check-title">${escapeHtml(c.text)}</div>
-            <div class="check-meta">
-              <span class="p-badge ${pClass(c.pLevel)}">${escapeHtml(c.pLevel)}</span>
-              <span>${escapeHtml(c.initiativeId)}: ${escapeHtml(c.initiativeName)}</span>
-              ${c.due ? `<span>Due ${escapeHtml(c.due)} (${escapeHtml(String(c.days))}d)</span>` : ""}
+    return `
+      <div class="ws-card ${init.lifecycle === 'Closed' ? 'closed' : ''}" data-id="${escapeHtml(init.id)}">
+        <div class="ws-header">
+          <div class="ws-title">
+            <span class="p-badge ${pClass(init.pLevel)}">${escapeHtml(init.pLevel)}</span>
+            <span class="lifecycle-badge ${lc.cls}">${escapeHtml(lc.label)}</span>
+            <div class="flex flex-col" style="min-width:0">
+              <div class="name truncate">${escapeHtml(init.name)}</div>
+              <div class="id">${escapeHtml(init.id)} · deadline ${escapeHtml(init.deadline)} (${daysUntil(init.deadline)}d)</div>
             </div>
           </div>
-          <button class="btn btn-sm btn-secondary" data-jump="${escapeHtml(c.initiativeId)}">Open</button>
-        </li>
-      `
-      )
-      .join("");
-
-    checklist.querySelectorAll("button[data-jump]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        window.DRI_APP.setPanel("workstreams");
-        window.dispatchEvent(new CustomEvent("dri:focus-initiative", { detail: { id: btn.dataset.jump } }));
-      });
-    });
-
-    // Urgent recommendations
-    const recs = (data.recommender || []).filter((r) => !isSnoozed("rec", r.id)).slice(0, 4);
-    $("#mc-recs").innerHTML = recs
-      .map(
-        (r) => `
-        <div class="rec-card">
-          <div class="rec-title">${escapeHtml(r.title)}</div>
-          <div class="rec-why">${escapeHtml(r.whyNow)}</div>
-          <div class="action-meta">
-            <span class="p-badge ${pClass((initiatives.find((i) => i.id === r.initiativeId) || {}).pLevel || "P2")}">${escapeHtml((initiatives.find((i) => i.id === r.initiativeId) || {}).pLevel || "P2")}</span>
-            <span>${escapeHtml(r.initiativeId)}</span>
-            <span>${escapeHtml(r.effort)}</span>
-          </div>
-          <div class="rec-actions">
-            <button class="btn btn-sm btn-primary" data-generate="${escapeHtml(r.id)}">Generate</button>
-            <button class="btn btn-sm btn-secondary" data-snooze="${escapeHtml(r.id)}">Not Relevant</button>
+          <div class="ws-meta">
+            <div style="min-width:140px">
+              <div class="text-muted" style="font-size:0.75rem; margin-bottom:6px">Progress: ${prog}%</div>
+              <div class="progress-bar"><div class="progress-fill ${progressColor(prog)}" style="width:${prog}%"></div></div>
+            </div>
+            <button class="btn btn-secondary btn-sm"><i class="fas fa-chevron-down"></i> Expand</button>
           </div>
         </div>
-      `
-      )
-      .join("");
-
-    $("#mc-recs").querySelectorAll("button[data-snooze]").forEach((b) => {
-      b.addEventListener("click", () => {
-        snooze("rec", b.dataset.snooze);
-        renderAll();
-      });
-    });
-
-    $("#mc-recs").querySelectorAll("button[data-generate]").forEach((b) => {
-      b.addEventListener("click", () => {
-        const recId = b.dataset.generate;
-        const rec = (data.recommender || []).find((x) => x.id === recId);
-        if (!rec) return;
-        window.DRI_APP.setPanel("ai-recommender");
-        window.dispatchEvent(new CustomEvent("dri:generate", { detail: { type: "rec", id: recId } }));
-      });
-    });
-
-    // Collaboration health alerts
-    const alerts = atRisk.slice(0, 4);
-    $("#mc-collab-alerts").innerHTML = alerts
-      .map(
-        (c) => `
-        <div class="collab-alert">
-          <div class="collab-avatar">${escapeHtml((c.name || "?").split(" ").slice(-1)[0].slice(0, 2).toUpperCase())}</div>
-          <div class="collab-main">
-            <div class="collab-name">${escapeHtml(c.name)} <span class="sentiment-badge ${escapeHtml(c.state.toLowerCase())}">${escapeHtml(c.state)}</span></div>
-            <div class="collab-rec">${escapeHtml(c.action)}</div>
-            <div class="rec-actions mt-12">
-              <button class="btn btn-sm btn-primary" data-draft-reengage="${escapeHtml(c.id)}">Draft message</button>
-              <button class="btn btn-sm btn-secondary" data-view-collab="${escapeHtml(c.id)}">View</button>
-            </div>
-          </div>
-        </div>
-      `
-      )
-      .join("");
-
-    $("#mc-collab-alerts").querySelectorAll("button[data-view-collab]").forEach((b) => {
-      b.addEventListener("click", () => {
-        window.DRI_APP.setPanel("collaborator-sentiment");
-        window.dispatchEvent(new CustomEvent("dri:focus-collab", { detail: { id: b.dataset.viewCollab } }));
-      });
-    });
-  }
-
-  function renderWorkstreams(data) {
-    const list = $("#workstream-list");
-    const filter = $(".filter-btn.active[data-filter]")?.dataset.filter || "active-measuring";
-    const sort = $("#ws-sort").value || "priority";
-
-    const initiatives = [...(data.initiatives || [])];
-
-    let filtered = initiatives;
-    if (filter === "active-measuring") {
-      filtered = initiatives.filter((i) => i.lifecycle === "Active" || i.lifecycle === "In Measurement");
-    }
-
-    const prank = (p) => ({ P0: 0, P1: 1, P2: 2, P3: 3 }[p] ?? 9);
-
-    filtered.sort((a, b) => {
-      if (sort === "deadline") {
-        return (daysUntil(a.deadline) ?? 999) - (daysUntil(b.deadline) ?? 999);
-      }
-      if (sort === "progress") {
-        return (b.progress || 0) - (a.progress || 0);
-      }
-      return prank(a.pLevel) - prank(b.pLevel);
-    });
-
-    list.innerHTML = filtered
-      .map((i) => {
-        const d = daysUntil(i.deadline);
-        const lc = lifecycleClass(i.lifecycle);
-        const closed = i.lifecycle === "Closed";
-        const progColor = progressColor(i.progress || 0);
-        const kpi = i.kpiImpact;
-
-        return `
-        <div class="ws-card ${closed ? "closed" : ""}" data-init="${escapeHtml(i.id)}">
-          <div class="ws-header">
-            <div class="ws-title">
-              <span class="p-badge ${pClass(i.pLevel)}">${escapeHtml(i.pLevel)}</span>
-              <span class="lifecycle-badge ${escapeHtml(lc)}">${escapeHtml(i.lifecycle)}</span>
-              <span class="ws-name">${escapeHtml(i.name)}</span>
-              <span class="ws-meta">${escapeHtml(i.id)}</span>
-            </div>
-            <div class="ws-meta">
-              <span>Deadline ${escapeHtml(i.deadline)}</span>
-              <span>${d === null ? "" : `${escapeHtml(String(d))}d`}</span>
-              <span style="min-width:120px;">${escapeHtml(String(i.progress || 0))}%</span>
-              <i class="fas fa-chevron-down"></i>
-            </div>
-          </div>
-          <div class="ws-body">
-            <div class="ws-section">
-              <h4>Progress</h4>
-              <div class="progress-bar"><div class="progress-fill ${progColor}" style="width:${Math.max(0, Math.min(100, i.progress || 0))}%"></div></div>
-            </div>
-
+        <div class="ws-body">
+          <div class="ws-body-grid">
             <div class="ws-section">
               <h4>Description</h4>
-              <div class="ws-desc">${escapeHtml(i.description || "")}</div>
+              <div class="text-secondary" style="line-height:1.4">${escapeHtml(init.description)}</div>
+              <div class="ws-risk">
+                ${riskSignals.map(r => `<div class="risk-chip">${escapeHtml(r)}</div>`).join('')}
+              </div>
             </div>
-
             <div class="ws-section">
-              <h4>Checklist (editable)</h4>
-              <ul class="ws-checklist">
-                ${(i.checklist || [])
-                  .map(
-                    (c) => `
-                  <li class="ws-check">
-                    <input type="checkbox" ${c.done ? "checked" : ""} data-check="${escapeHtml(i.id)}::${escapeHtml(c.id)}" />
-                    <div class="check-text ${c.done ? "done" : ""}">${escapeHtml(c.text)}</div>
-                    <div class="text-muted" style="font-size:0.75rem;">${c.due ? `Due ${escapeHtml(c.due)}` : ""}</div>
-                  </li>
-                `
-                  )
-                  .join("")}
-              </ul>
-            </div>
-
-            <div class="ws-section">
-              <h4>Risks and blockers (demo)</h4>
-              <div class="ws-risks">
-                ${(i.risks || []).length
-                  ? (i.risks || [])
-                      .map((r) => `<div class="risk-item"><strong>${escapeHtml(r.level)}:</strong> ${escapeHtml(r.text)}</div>`)
-                      .join("")
-                  : `<div class="text-muted">No risks captured.</div>`}
+              <h4>RAPID</h4>
+              <div class="ws-kv">
+                <div class="k">Recommend</div><div>${escapeHtml(init.rapid.recommend)}</div>
+                <div class="k">Agree</div><div>${escapeHtml(init.rapid.agree)}</div>
+                <div class="k">Perform</div><div>${escapeHtml(init.rapid.perform)}</div>
+                <div class="k">Input</div><div>${escapeHtml(init.rapid.input)}</div>
+                <div class="k">Decide</div><div>${escapeHtml(init.rapid.decide)}</div>
               </div>
-            </div>
-
-            <div class="ws-section">
-              <h4>RAPID (placeholders)</h4>
-              <div class="ws-rapid">
-                ${Object.entries(i.rapid || {}).map(([k, v]) => `<div class="rapid-item"><b>${escapeHtml(k)}:</b> ${escapeHtml(v)}</div>`).join("")}
-              </div>
-            </div>
-
-            <div class="ws-section">
-              <h4>Artifacts</h4>
-              <div class="artifact-list">
-                ${(i.artifacts || []).map((a) => `<div class="artifact"><a href="${escapeHtml(a.href || "#")}" target="_blank" rel="noreferrer">${escapeHtml(a.name)}</a><button class="btn btn-sm btn-secondary" data-copy="${escapeHtml(a.name)}">Copy link</button></div>`).join("")}
-              </div>
-            </div>
-
-            ${kpi ? `
-              <div class="ws-section">
-                <h4>KPI impact (demo)</h4>
-                <div class="ws-desc">${escapeHtml(kpi.note || "")}</div>
-                <div class="ws-meta" style="margin-top:8px;">
-                  ${(kpi.metrics || []).map((m) => `<span class="card-badge">${escapeHtml(m.name)} ${escapeHtml(m.value)} (${escapeHtml(m.period)})</span>`).join("")}
-                </div>
-              </div>
-            ` : ""}
-
-            <div class="ws-section">
-              <h4>Actions</h4>
-              <div class="rec-actions">
-                <button class="btn btn-sm btn-primary" data-draft-update="${escapeHtml(i.id)}"><i class="fas fa-pen"></i> Draft Slack update</button>
-                <button class="btn btn-sm btn-secondary" data-log-decision="${escapeHtml(i.id)}"><i class="fas fa-gavel"></i> Log decision</button>
+              <div class="mt-12">
+                <h4>Checklist</h4>
+                <ul class="ws-checklist">
+                  ${(init.checklist || []).map(c => `
+                    <li class="ws-check-item ${c.done ? 'done' : ''}" data-check="${escapeHtml(init.id)}::${escapeHtml(c.id)}">
+                      <div class="left">
+                        <input type="checkbox" ${c.done ? 'checked' : ''} />
+                        <div class="label truncate">${escapeHtml(c.text)}<div class="text-muted" style="font-size:0.75rem">due ${escapeHtml(c.due)} (${daysUntil(c.due)}d)</div></div>
+                      </div>
+                      <span class="p-badge ${pClass(init.pLevel)}">${escapeHtml(init.pLevel)}</span>
+                    </li>
+                  `).join('')}
+                </ul>
               </div>
             </div>
           </div>
-        </div>
-      `;
-      })
-      .join("");
-
-    // expand / collapse
-    $$(".ws-header", list).forEach((h) => {
-      h.addEventListener("click", () => {
-        const card = h.closest(".ws-card");
-        card.classList.toggle("expanded");
-      });
-    });
-
-    // checklist toggles stored in local state
-    list.querySelectorAll("input[data-check]").forEach((cb) => {
-      cb.addEventListener("change", () => {
-        const [initId, checkId] = cb.dataset.check.split("::");
-        const init = (data.initiatives || []).find((x) => x.id === initId);
-        if (!init) return;
-        const item = (init.checklist || []).find((x) => x.id === checkId);
-        if (!item) return;
-        item.done = cb.checked;
-        renderAll();
-      });
-    });
-
-    // focus initiative
-    window.addEventListener("dri:focus-initiative", (e) => {
-      const id = e.detail?.id;
-      if (!id) return;
-      const card = list.querySelector(`.ws-card[data-init="${CSS.escape(id)}"]`);
-      if (!card) return;
-      card.classList.add("expanded");
-      card.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-
-    // filter buttons
-    $$(".filter-btn[data-filter]").forEach((b) => {
-      b.addEventListener("click", () => {
-        $$(".filter-btn[data-filter]").forEach((x) => x.classList.remove("active"));
-        b.classList.add("active");
-        renderWorkstreams(window.DRI_DATA);
-      });
-    });
-
-    $("#ws-sort").addEventListener("change", () => renderWorkstreams(window.DRI_DATA));
-
-    // search event
-    window.addEventListener("dri:search", (e) => {
-      const q = e.detail?.query;
-      if (!q) return;
-      const cards = $$(".ws-card", list);
-      cards.forEach((c) => {
-        const text = c.textContent.toLowerCase();
-        c.style.display = text.includes(q) ? "block" : "none";
-      });
-      const first = cards.find((c) => c.style.display !== "none");
-      if (first) first.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-
-    // draft update
-    list.querySelectorAll("button[data-draft-update]").forEach((b) => {
-      b.addEventListener("click", () => {
-        const initId = b.dataset.draftUpdate;
-        const init = (data.initiatives || []).find((x) => x.id === initId);
-        if (!init) return;
-        const missing = (init.checklist || []).filter((c) => !c.done).slice(0, 3).map((c) => c.text);
-        const d = daysUntil(init.deadline);
-
-        const msg = [
-          `Update on ${init.id} (${init.pLevel}): ${init.name}`,
-          `Progress: ${init.progress}% | Deadline: ${init.deadline} (${d === null ? "" : d + "d"})`,
-          missing.length ? `Next up: ${missing.join("; ")}.` : "Next up: closeout checks and measurement plan.",
-          "If you are an approver, please review the linked artifacts today."
-        ].join("\n");
-
-        alert(msg);
-      });
-    });
-
-    // log decision shortcut
-    list.querySelectorAll("button[data-log-decision]").forEach((b) => {
-      b.addEventListener("click", () => {
-        window.DRI_APP.setPanel("decision-log");
-      });
-    });
-
-    // copy link (demo)
-    list.querySelectorAll("button[data-copy]").forEach((b) => {
-      b.addEventListener("click", async () => {
-        try {
-          await navigator.clipboard.writeText("#");
-          b.textContent = "Copied";
-          setTimeout(() => (b.textContent = "Copy link"), 900);
-        } catch {
-          // ignore
-        }
-      });
-    });
-  }
-
-  function draftSlackResponse(thread) {
-    // Keep under ~200 words.
-    const init = (window.DRI_DATA.initiatives || []).find((i) => i.id === thread.initiativeId);
-    const context = init ? `${init.id} (${init.pLevel})` : "this initiative";
-
-    if (thread.urgency === "High") {
-      return (
-        `Thanks for the ping. On ${context}: ` +
-        `I will confirm the required artifact today and attach it to the Jira ticket. ` +
-        `If you need a decision from me, please drop the two options and the deadline in this thread and I will respond by EOD.`
-      );
-    }
-
-    return (
-      `On ${context}: ` +
-      `I see the question. I will validate against the readiness requirements and reply with the decision and next steps today. ` +
-      `If you have a specific deadline or dependency, please call it out.`
-    );
-  }
-
-  function renderComms(data) {
-    const unreplied = (data.comms?.unreplied || []).filter((t) => !isSnoozed("comms", t.id));
-    const openThreads = (data.comms?.openThreads || []).filter((t) => !isSnoozed("comms", t.id));
-    const proactive = (data.comms?.proactive || []).filter((t) => !isSnoozed("comms", t.id));
-
-    const renderThread = (t, opts = {}) => {
-      const init = (data.initiatives || []).find((i) => i.id === t.initiativeId);
-      const p = init?.pLevel || "P2";
-
-      const badge = opts.confidence
-        ? `<span class="confidence-badge ${escapeHtml(opts.confidenceClass)}">${escapeHtml(opts.confidence)}</span>`
-        : `<span class="p-badge ${pClass(p)}">${escapeHtml(p)}</span>`;
-
-      const metaPieces = [
-        t.sender ? escapeHtml(t.sender) : null,
-        t.channel ? escapeHtml(t.channel) : null,
-        t.timestamp ? escapeHtml(t.timestamp) : null
-      ].filter(Boolean);
-
-      const extra = opts.extraHtml || "";
-
-      return `
-        <div class="thread-card" data-thread="${escapeHtml(t.id)}">
-          <div class="thread-top">
-            <div class="thread-from">
-              ${badge}
-              <span>${escapeHtml(t.sender || t.channel || "Thread")}</span>
-            </div>
-            <div class="thread-meta">
-              ${metaPieces.map((x) => `<span>${x}</span>`).join("")}
-              ${t.newCount ? `<span class="card-badge">+${escapeHtml(String(t.newCount))} new</span>` : ""}
-            </div>
-          </div>
-          <div class="thread-preview">${escapeHtml(t.preview || t.summary || t.context || "")}</div>
-          <div class="thread-context">
-            ${t.initiativeId ? `<span class="card-badge">${escapeHtml(t.initiativeId)}</span>` : ""}
-            ${t.urgency ? `<span class="card-badge" style="background:rgba(239,68,68,0.15);color:var(--accent-red)">${escapeHtml(t.urgency)} urgency</span>` : ""}
-            ${t.signal ? `<span class="card-badge">Signal: ${escapeHtml(t.signal)}</span>` : ""}
-          </div>
-          ${extra}
-          <div class="thread-actions">
-            <button class="btn btn-sm btn-primary" data-draft="${escapeHtml(t.id)}">Draft Response</button>
-            <button class="btn btn-sm btn-secondary" data-snooze="${escapeHtml(t.id)}">Not Relevant</button>
-          </div>
-          <div class="draft-box" style="display:none;"><textarea></textarea><div class="rec-actions mt-12"><button class="btn btn-sm btn-success" data-copy-draft="${escapeHtml(t.id)}">Copy</button><button class="btn btn-sm btn-secondary" data-close-draft="${escapeHtml(t.id)}">Close</button></div></div>
-        </div>
-      `;
-    };
-
-    $("#unreplied-list").innerHTML = unreplied.map((t) => renderThread(t)).join("");
-    $("#open-threads-list").innerHTML = openThreads
-      .map((t) => renderThread({ ...t, sender: "Open thread" }, { extraHtml: `<div class="text-muted" style="font-size:0.8rem;">Catch-up: ${escapeHtml(t.summary || "")}</div>` }))
-      .join("");
-
-    $("#proactive-list").innerHTML = proactive
-      .map((t) =>
-        renderThread(
-          { ...t, sender: "Recommendation", preview: `${t.talkingPoint || ""} ${t.context || ""}` },
-          {
-            confidence: t.confidence,
-            confidenceClass: String(t.confidence || "Low").toLowerCase().replace(/\s+/g, "-")
-          }
-        )
-      )
-      .join("");
-
-    // Wire actions
-    $$("button[data-snooze]", $("#comms-queue")).forEach((b) => {
-      b.addEventListener("click", () => {
-        snooze("comms", b.dataset.snooze);
-        renderAll();
-      });
-    });
-
-    $$("button[data-draft]", $("#comms-queue")).forEach((b) => {
-      b.addEventListener("click", () => {
-        const id = b.dataset.draft;
-        const t = [...(data.comms?.unreplied || []), ...(data.comms?.openThreads || []), ...(data.comms?.proactive || [])].find((x) => x.id === id);
-        if (!t) return;
-        const card = b.closest(".thread-card");
-        const box = $(".draft-box", card);
-        const ta = $("textarea", box);
-        ta.value = draftSlackResponse(t);
-        box.style.display = "block";
-      });
-    });
-
-    $$("button[data-close-draft]", $("#comms-queue")).forEach((b) => {
-      b.addEventListener("click", () => {
-        const card = b.closest(".thread-card");
-        const box = $(".draft-box", card);
-        box.style.display = "none";
-      });
-    });
-
-    $$("button[data-copy-draft]", $("#comms-queue")).forEach((b) => {
-      b.addEventListener("click", async () => {
-        const card = b.closest(".thread-card");
-        const txt = $("textarea", $(".draft-box", card)).value;
-        try {
-          await navigator.clipboard.writeText(txt);
-          b.textContent = "Copied";
-          setTimeout(() => (b.textContent = "Copy"), 900);
-        } catch {
-          // ignore
-        }
-      });
-    });
-  }
-
-  function scoreToPercent(x) {
-    // x 1..5
-    const v = Math.max(1, Math.min(5, Number(x || 1)));
-    return Math.round(((v - 1) / 4) * 100);
-  }
-
-  function renderSentiment(data) {
-    const grid = $("#sentiment-grid");
-    const tier = $(".filter-btn.active[data-tier]")?.dataset.tier || "role";
-    const q = ($("#collab-search").value || "").trim().toLowerCase();
-
-    let rows = data.collaborators || [];
-
-    // For demo: tier just changes grouping label.
-    const labelFor = (c) => {
-      if (tier === "org") return c.tierOrg;
-      if (tier === "individual") return c.name;
-      return `${c.tierRole} (${c.tierOrg})`;
-    };
-
-    if (q) {
-      rows = rows.filter((c) => labelFor(c).toLowerCase().includes(q) || (c.name || "").toLowerCase().includes(q));
-    }
-
-    grid.innerHTML = rows
-      .map((c) => {
-        const lbl = labelFor(c);
-        const state = String(c.state || "Stable").toLowerCase();
-
-        const dims = c.dims || {};
-        const dimLines = Object.entries(dims)
-          .map(([k, v]) => {
-            const pct = scoreToPercent(v);
-            return `
-              <div class="score-row">
-                <div class="score-label">${escapeHtml(k)}</div>
-                <div class="score-value">${escapeHtml(String(v))}</div>
-                <div class="score-meter"><div style="width:${pct}%"></div></div>
-              </div>
-            `;
-          })
-          .join("");
-
-        return `
-          <div class="card sentiment-card" data-collab="${escapeHtml(c.id)}">
-            <div class="top">
-              <div>
-                <div class="sentiment-name">${escapeHtml(lbl)}</div>
-                <div class="sentiment-sub">${escapeHtml(c.name)}</div>
-              </div>
-              <div style="text-align:right;">
-                <span class="sentiment-badge ${escapeHtml(state)}">${escapeHtml(c.state)}</span>
-                <div class="text-muted" style="margin-top:6px;font-size:0.75rem;">Composite: ${escapeHtml(String(c.composite))}</div>
-              </div>
-            </div>
-            <div>${dimLines}</div>
-          </div>
-        `;
-      })
-      .join("");
-
-    const modal = $("#sentiment-modal");
-    const modalBody = $("#sentiment-modal-body");
-
-    function closeModal() {
-      modal.style.display = "none";
-    }
-
-    modal.querySelector(".modal-overlay").addEventListener("click", closeModal);
-    modal.querySelector(".modal-close").addEventListener("click", closeModal);
-
-    grid.querySelectorAll(".sentiment-card").forEach((card) => {
-      card.addEventListener("click", () => {
-        const id = card.dataset.collab;
-        const c = (data.collaborators || []).find((x) => x.id === id);
-        if (!c) return;
-
-        modalBody.innerHTML = `
-          <h3>${escapeHtml(c.name)}</h3>
-          <div class="mb-12"><span class="sentiment-badge ${escapeHtml(String(c.state).toLowerCase())}">${escapeHtml(c.state)}</span> <span class="text-muted">Composite ${escapeHtml(String(c.composite))}</span></div>
-          <div class="output-card">
-            <h4>Recommended action</h4>
-            <pre>${escapeHtml(c.action)}</pre>
-          </div>
-          <div class="output-card">
-            <h4>Draft re-engagement message (demo)</h4>
-            <pre>${escapeHtml(
-              `Quick sync on the current readiness items. I attached the latest draft and called out the two decisions needed.\n\nIf you can confirm (1) owner for approvals and (2) latest timeline constraints by EOD, I will align the plan and keep you out of unnecessary threads.`
-            )}</pre>
-          </div>
-          <div class="rec-actions">
-            <button class="btn btn-primary" id="copy-reengage">Copy message</button>
-            <button class="btn btn-secondary" id="close-reengage">Close</button>
-          </div>
-        `;
-
-        $("#copy-reengage", modalBody).addEventListener("click", async () => {
-          const text = $("pre", modalBody).textContent;
-          try {
-            await navigator.clipboard.writeText(text);
-          } catch {
-            // ignore
-          }
-        });
-        $("#close-reengage", modalBody).addEventListener("click", closeModal);
-
-        modal.style.display = "flex";
-      });
-    });
-
-    // tier buttons
-    $$(".filter-btn[data-tier]").forEach((b) => {
-      b.addEventListener("click", () => {
-        $$(".filter-btn[data-tier]").forEach((x) => x.classList.remove("active"));
-        b.classList.add("active");
-        renderSentiment(window.DRI_DATA);
-      });
-    });
-
-    // search
-    $("#collab-search").addEventListener("input", () => renderSentiment(window.DRI_DATA));
-
-    window.addEventListener("dri:focus-collab", (e) => {
-      const id = e.detail?.id;
-      if (!id) return;
-      const card = grid.querySelector(`[data-collab="${CSS.escape(id)}"]`);
-      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  }
-
-  function renderWorldview(data) {
-    const filter = $(".filter-btn.active[data-wv]")?.dataset.wv || "all";
-    const items = (data.worldview || []).filter((w) => !isSnoozed("wv", w.id));
-
-    const filtered = filter === "all" ? items : items.filter((w) => String(w.type).toLowerCase() === filter);
-
-    $("#worldview-grid").innerHTML = filtered
-      .map(
-        (w) => `
-      <div class="world-card" data-wv="${escapeHtml(w.id)}">
-        <div class="flex justify-between items-center">
-          <span class="type-badge ${escapeHtml(String(w.type).toLowerCase())}">${escapeHtml(w.type)}</span>
-          <span class="card-badge">Relevance: ${escapeHtml(w.relevance || "")}</span>
-        </div>
-        <div class="world-title">${escapeHtml(w.title)}</div>
-        <div class="world-summary">${escapeHtml(w.summary)}</div>
-        <div class="world-so-what"><b>So what:</b> ${escapeHtml(w.soWhat)}</div>
-        <div class="world-actions">
-          <button class="btn btn-sm btn-secondary" data-snooze-wv="${escapeHtml(w.id)}">Not Relevant</button>
         </div>
       </div>
-    `
-      )
-      .join("");
+    `;
+  }).join('');
 
-    $("#worldview-grid").querySelectorAll("button[data-snooze-wv]").forEach((b) => {
-      b.addEventListener("click", () => {
-        snooze("wv", b.dataset.snoozeWv);
-        renderAll();
-      });
-    });
-
-    $$(".filter-btn[data-wv]").forEach((b) => {
-      b.addEventListener("click", () => {
-        $$(".filter-btn[data-wv]").forEach((x) => x.classList.remove("active"));
-        b.classList.add("active");
-        renderWorldview(window.DRI_DATA);
-      });
-    });
-  }
-
-  function renderRecommender(data) {
-    const list = $("#recommender-list");
-    const initiatives = data.initiatives || [];
-
-    const recs = (data.recommender || []).filter((r) => !isSnoozed("rec", r.id)).slice(0, 7);
-
-    list.innerHTML = recs
-      .map((r) => {
-        const init = initiatives.find((i) => i.id === r.initiativeId);
-        const p = init?.pLevel || "P2";
-
-        return `
-          <div class="recommendation" data-rec="${escapeHtml(r.id)}">
-            <div class="rec-head">
-              <div>
-                <h4>${escapeHtml(r.title)}</h4>
-                <div class="rec-meta">
-                  <span class="p-badge ${pClass(p)}">${escapeHtml(p)}</span>
-                  <span class="card-badge">${escapeHtml(r.initiativeId)}</span>
-                  <span class="card-badge">${escapeHtml(r.effort)}</span>
-                </div>
-              </div>
-              <button class="btn btn-sm btn-secondary" data-snooze="${escapeHtml(r.id)}">Not Relevant</button>
-            </div>
-            <div class="rec-detail"><b>Why now:</b> ${escapeHtml(r.whyNow)}</div>
-            <div class="rec-detail"><b>Trigger:</b> ${escapeHtml(r.trigger)}</div>
-            <div class="rec-actions mt-12">
-              <button class="btn btn-sm btn-primary" data-generate="${escapeHtml(r.id)}">Generate</button>
-              <button class="btn btn-sm btn-secondary" data-open="${escapeHtml(r.initiativeId)}">Open workstream</button>
-            </div>
-            <div class="output-card" style="display:none; margin-top:12px;"><h4>Generated artifact (demo)</h4><pre></pre><div class="rec-actions mt-12"><button class="btn btn-sm btn-success" data-copy="${escapeHtml(r.id)}">Copy</button><button class="btn btn-sm btn-secondary" data-close="${escapeHtml(r.id)}">Close</button></div></div>
-          </div>
-        `;
-      })
-      .join("");
-
-    list.querySelectorAll("button[data-snooze]").forEach((b) => {
-      b.addEventListener("click", () => {
-        snooze("rec", b.dataset.snooze);
-        renderAll();
-      });
-    });
-
-    list.querySelectorAll("button[data-open]").forEach((b) => {
-      b.addEventListener("click", () => {
-        window.DRI_APP.setPanel("workstreams");
-        window.dispatchEvent(new CustomEvent("dri:focus-initiative", { detail: { id: b.dataset.open } }));
-      });
-    });
-
-    function generateArtifact(rec) {
-      const init = initiatives.find((i) => i.id === rec.initiativeId);
-      const now = new Date().toISOString().slice(0, 10);
-
-      // Demo artifacts: always editable text, no fabricated owners/dates beyond initiative deadline.
-      return [
-        `Artifact: ${rec.title}`,
-        `Initiative: ${init ? init.id + " - " + init.name : rec.initiativeId}`,
-        `Generated: ${now}`,
-        "",
-        "Purpose",
-        "- Produce a ready-to-use readiness artifact to unblock the next decision and reduce timeline risk.",
-        "",
-        "Inputs needed (fill in)",
-        "- Link to Jira epic/ticket",
-        "- RAPID roles (Recommend/Agree/Perform/Input/Decide)",
-        "- Ship date + any phased rollout",
-        "- Affected LOBs and audiences",
-        "",
-        "Deliverable",
-        "- Draft text is a placeholder. Replace with playbook-aligned content and attach to Jira.",
-        "",
-        "Next steps",
-        "- Confirm owner for approvals",
-        "- Finalize go/no-go criteria and measurement plan",
-        "- Send Slack comms to stakeholders"
-      ].join("\n");
-    }
-
-    list.querySelectorAll("button[data-generate]").forEach((b) => {
-      b.addEventListener("click", () => {
-        const recId = b.dataset.generate;
-        const rec = (data.recommender || []).find((x) => x.id === recId);
-        if (!rec) return;
-        const card = b.closest(".recommendation");
-        const out = $(".output-card", card);
-        $("pre", out).textContent = generateArtifact(rec);
-        out.style.display = "block";
-      });
-    });
-
-    list.querySelectorAll("button[data-close]").forEach((b) => {
-      b.addEventListener("click", () => {
-        const card = b.closest(".recommendation");
-        $(".output-card", card).style.display = "none";
-      });
-    });
-
-    list.querySelectorAll("button[data-copy]").forEach((b) => {
-      b.addEventListener("click", async () => {
-        const card = b.closest(".recommendation");
-        const txt = $("pre", $(".output-card", card)).textContent;
-        try {
-          await navigator.clipboard.writeText(txt);
-          b.textContent = "Copied";
-          setTimeout(() => (b.textContent = "Copy"), 900);
-        } catch {
-          // ignore
-        }
-      });
-    });
-  }
-
-  function classifyPLevel(text) {
-    const t = text.toLowerCase();
-    if (/(launch|outage|regulator|fraud|security|incident|p0)/.test(t)) return "P0";
-    if (/(policy|pricing|banking|payments|deadline|p1)/.test(t)) return "P1";
-    if (/(copy|macro|kb|workflow|p2)/.test(t)) return "P2";
-    return "P3";
-  }
-
-  function generateIntakeArtifacts(inputText) {
-    const today = new Date().toISOString().slice(0, 10);
-    const p = classifyPLevel(inputText);
-
-    const pRationale = {
-      P0: "Classified as P0 due to signals of launch/incident/security/regulatory impact. Validate against playbook and update if needed.",
-      P1: "Classified as P1 due to policy or customer-impacting change signals. Validate against playbook and update if needed.",
-      P2: "Classified as P2 based on content/workflow change signals. Validate against playbook and update if needed.",
-      P3: "Classified as P3 by default due to limited risk signals. Validate against playbook and update if needed."
+  // Expand handlers
+  qsa('.ws-card .ws-header').forEach(h => {
+    h.onclick = () => {
+      const card = h.closest('.ws-card');
+      card.classList.toggle('expanded');
     };
+  });
 
-    const artifacts = {
-      classification: [
-        `P-level: ${p}`,
-        `Rationale: ${pRationale[p]}`,
-        "Affected LOBs: (fill in)",
-        "Risk if advocates are unprepared: (fill in)"
-      ].join("\n"),
-
-      rapid: [
-        "RAPID (fill in names)",
-        "- Recommend:",
-        "- Agree:",
-        "- Perform:",
-        "- Input:",
-        "- Decide:"
-      ].join("\n"),
-
-      stakeholderMsg: [
-        "Slack message (ready to send)",
-        "",
-        "Sharing a readiness heads-up on the change below.",
-        "",
-        "What is changing:",
-        inputText.trim() ? inputText.trim() : "(paste change summary)",
-        "",
-        "What I need from you today:",
-        "- Confirm owner for approvals and the RAPID roles",
-        "- Confirm ship date and any phased rollout",
-        "- Confirm the top 3 advocate risks or known failure modes",
-        "",
-        "I will return with a training brief, comms draft, go/no-go checklist, and measurement plan attached to the Jira intake ticket."
-      ].join("\n"),
-
-      trainingBrief: [
-        "Training brief",
-        `Generated: ${today}`,
-        "",
-        "Audience",
-        "- Primary: Advocates in affected LOBs",
-        "- Secondary: QA, BPO trainers, Content Ops",
-        "",
-        "Modality (pick one)",
-        "- Quick-read (KB + macro) with 5-question comprehension check",
-        "- Live enablement session + recording",
-        "- Train-the-trainer for BPO sites",
-        "",
-        "Timeline",
-        "- Draft ready:",
-        "- Review complete:",
-        "- Delivery date:",
-        "",
-        "Prerequisites",
-        "- Access to updated KB article",
-        "- Decision record for edge-case handling",
-        "",
-        "Success criteria",
-        "- Training completion >= (target)%",
-        "- Comprehension score >= (target)%",
-        "- No critical readiness gaps at go/no-go"
-      ].join("\n"),
-
-      goNoGo: [
-        "Go/No-Go checklist (binary, measurable)",
-        "1) RAPID roles are confirmed in Jira.",
-        "2) Final KB/macro content is published and linked.",
-        "3) Training is delivered and completion meets target.",
-        "4) Comprehension check meets target and top misses are addressed.",
-        "5) BPO sites have localized materials and trainer sign-off.",
-        "6) QA rubric updates are published and QA leads acknowledge.",
-        "7) Escalation path is documented for top 3 failure modes.",
-        "8) Measurement plan is defined (leading 7d, lagging 30d).
-9) Abort triggers are documented and owners are assigned.
-10) Comms are sent with a single source of truth link."
-      ].join("\n"),
-
-      measurement: [
-        "Measurement plan",
-        "Leading (7-day)",
-        "- Training completion and comprehension trend",
-        "- Contact driver mix changes relevant to the change",
-        "- QA defect rate for new policy/process failure modes",
-        "",
-        "Lagging (30-day)",
-        "- FCR, CSAT, AHT, QA composite (by LOB)",
-        "",
-        "Success definition",
-        "- (fill in) Target movement or non-regression vs baseline",
-        "",
-        "Abort triggers",
-        "- If KPI regresses beyond (threshold) for (days), initiate rollback or mitigation"
-      ].join("\n")
+  // Checklist toggles
+  qsa('.ws-check-item input[type="checkbox"]').forEach(cb => {
+    cb.onchange = () => {
+      const li = cb.closest('.ws-check-item');
+      const key = li.getAttribute('data-check');
+      const [initId, checkId] = key.split('::');
+      const init = initiatives.find(i => i.id === initId);
+      const item = init?.checklist?.find(c => c.id === checkId);
+      if (item) item.done = cb.checked;
+      renderAll('workstreams');
+      renderAll('mission-control');
     };
+  });
 
-    return artifacts;
-  }
-
-  function renderIntake() {
-    const btnGen = $("#intake-generate");
-    const btnClear = $("#intake-clear");
-    const input = $("#intake-text");
-    const out = $("#intake-output");
-
-    btnGen.addEventListener("click", () => {
-      const artifacts = generateIntakeArtifacts(input.value || "");
-      out.style.display = "block";
-      out.innerHTML = `
-        <div class="output-card"><h4>P-level classification</h4><pre>${escapeHtml(artifacts.classification)}</pre></div>
-        <div class="output-card"><h4>RAPID assignments</h4><pre>${escapeHtml(artifacts.rapid)}</pre></div>
-        <div class="output-card"><h4>Stakeholder Slack message</h4><pre>${escapeHtml(artifacts.stakeholderMsg)}</pre></div>
-        <div class="output-card"><h4>Training brief</h4><pre>${escapeHtml(artifacts.trainingBrief)}</pre></div>
-        <div class="output-card"><h4>Go/No-Go checklist</h4><pre>${escapeHtml(artifacts.goNoGo)}</pre></div>
-        <div class="output-card"><h4>Measurement plan</h4><pre>${escapeHtml(artifacts.measurement)}</pre></div>
-        <div class="rec-actions">
-          <button class="btn btn-primary" id="intake-copy">Copy all</button>
-          <button class="btn btn-secondary" id="intake-hide">Hide</button>
-        </div>
-      `;
-
-      $("#intake-copy").addEventListener("click", async () => {
-        const txt = Object.values(artifacts).join("\n\n---\n\n");
-        try {
-          await navigator.clipboard.writeText(txt);
-        } catch {
-          // ignore
-        }
-      });
-      $("#intake-hide").addEventListener("click", () => {
-        out.style.display = "none";
-      });
-    });
-
-    btnClear.addEventListener("click", () => {
-      input.value = "";
-      out.style.display = "none";
-    });
-  }
-
-  function gapCheck(text) {
-    const t = text.toLowerCase();
-    const checks = [
-      { label: "P-level defined", ok: /p0|p1|p2|p3/.test(t) },
-      { label: "RAPID roles present", ok: /rapid|recommend|agree|perform|input|decide/.test(t) },
-      { label: "Deadline/timeline present", ok: /deadline|ship|launch|date|timeline/.test(t) },
-      { label: "Training plan present", ok: /training|enablement|l&d|assessment|comprehension/.test(t) },
-      { label: "Go/No-Go criteria present", ok: /go\/no-go|gono|criteria/.test(t) },
-      { label: "Measurement plan present", ok: /measurement|kpi|fcr|csat|aht|qa/.test(t) },
-      { label: "Comms coverage present", ok: /comms|slack|announcement|stakeholder/.test(t) },
-      { label: "Dependencies / blockers present", ok: /dependency|blocked|risk|assumption/.test(t) }
-    ];
-    const okCount = checks.filter((c) => c.ok).length;
-    const confidence = okCount >= 7 ? "High" : okCount >= 4 ? "Medium" : "Low";
-
-    return { checks, okCount, confidence };
-  }
-
-  function renderGapAnalysis() {
-    const btn = $("#gap-analyze");
-    const clear = $("#gap-clear");
-    const input = $("#gap-text");
-    const out = $("#gap-output");
-
-    btn.addEventListener("click", () => {
-      const text = input.value || "";
-      const res = gapCheck(text);
-
-      const strengths = res.checks.filter((c) => c.ok).map((c) => `- ${c.label}`);
-      const gaps = res.checks.filter((c) => !c.ok).map((c) => `- Missing: ${c.label}`);
-
-      out.style.display = "block";
-      out.innerHTML = `
-        <div class="output-card"><h4>Strengths</h4><pre>${escapeHtml(strengths.length ? strengths.join("\n") : "- None detected. Add basic readiness scaffolding.")}</pre></div>
-        <div class="output-card"><h4>Critical gaps (demo heuristic)</h4><pre>${escapeHtml(gaps.length ? gaps.join("\n") : "- No obvious gaps detected by heuristic. Validate against playbook.")}</pre></div>
-        <div class="output-card"><h4>Risks</h4><pre>${escapeHtml(
-          "- If required artifacts are missing, stakeholders will make decisions on incomplete info.\n- If measurement is undefined, you will not be able to prove impact or catch regressions quickly."
-        )}</pre></div>
-        <div class="output-card"><h4>Missing artifacts</h4><pre>${escapeHtml(
-          "- Training brief (if applicable)\n- Comms draft\n- Go/No-Go checklist\n- Measurement plan\n- Decision log entry"
-        )}</pre></div>
-        <div class="output-card"><h4>Suggested additions</h4><pre>${escapeHtml(
-          "- Add RAPID table with named owners\n- Add timeline with milestones and dependency owners\n- Add 7-day leading indicators and 30-day lagging KPI plan\n- Add abort triggers and rollback path"
-        )}</pre></div>
-        <div class="output-card"><h4>Confidence</h4><pre>${escapeHtml(res.confidence)}</pre></div>
-      `;
-    });
-
-    clear.addEventListener("click", () => {
-      input.value = "";
-      out.style.display = "none";
-    });
-  }
-
-  function renderQBR(data) {
-    const btn = $("#qbr-generate");
-    const out = $("#qbr-output");
-
-    btn.addEventListener("click", () => {
-      const q = $("#qbr-quarter").value;
-      const initiatives = data.initiatives || [];
-      const active = initiatives.filter((i) => i.lifecycle === "Active");
-      const measuring = initiatives.filter((i) => i.lifecycle === "In Measurement");
-      const closed = initiatives.filter((i) => i.lifecycle === "Closed");
-
-      const table = (rows) => {
-        const header = "ID | P | Lifecycle | Deadline | Progress | Name";
-        const sep = "---|---|---|---|---|---";
-        const body = rows
-          .map((i) => `${i.id} | ${i.pLevel} | ${i.lifecycle} | ${i.deadline} | ${i.progress}% | ${i.name}`)
-          .join("\n");
-        return [header, sep, body].join("\n");
-      };
-
-      const doc = [
-        `QBR Draft (${q})`,
-        "",
-        "Executive summary (demo)",
-        `- Active initiatives: ${active.length}`,
-        `- In Measurement: ${measuring.length}`,
-        `- Closed: ${closed.length}`,
-        "- Replace demo values with Jira + Snowflake pulls.",
-        "",
-        "Program results table (demo)",
-        table(initiatives),
-        "",
-        "Start / Stop / Continue (demo)",
-        "Start:",
-        "- Enforce artifact completeness gates earlier for P0/P1 initiatives.",
-        "Stop:",
-        "- Letting RAPID ambiguity linger past intake.",
-        "Continue:",
-        "- Weekly risk-based readiness reviews tied to deadlines.",
-        "",
-        "Forward pipeline (demo)",
-        "- Add top 3 upcoming initiatives from Jira intake.",
-        "",
-        "KPI dashboard (demo placeholders)",
-        "- FCR: connect Snowflake",
-        "- CSAT: connect Snowflake",
-        "- AHT: connect Snowflake",
-        "- QA: connect Snowflake"
-      ].join("\n");
-
-      out.style.display = "block";
-      out.innerHTML = `<div class="qbr-doc">${escapeHtml(doc)}</div><div class="rec-actions mt-16"><button class="btn btn-primary" id="qbr-copy">Copy</button></div>`;
-
-      $("#qbr-copy").addEventListener("click", async () => {
-        try {
-          await navigator.clipboard.writeText(doc);
-        } catch {
-          // ignore
-        }
-      });
-    });
-  }
-
-  function renderBrag(data) {
-    const grid = $("#brag-grid");
-    const filter = $(".filter-btn.active[data-comp]")?.dataset.comp || "all";
-    const wins = data.wins || [];
-
-    const filtered = filter === "all" ? wins : wins.filter((w) => w.comp === filter);
-
-    grid.innerHTML = filtered
-      .map(
-        (w) => `
-        <div class="win-card" data-win="${escapeHtml(w.id)}">
-          <div class="flex justify-between items-center">
-            <span class="comp-badge ${escapeHtml(w.comp)}">${escapeHtml(w.comp)}</span>
-            <span class="text-muted">${escapeHtml(w.when || "")}</span>
-          </div>
-          <div class="win-title">${escapeHtml(w.title)}</div>
-          <div class="win-desc">${escapeHtml(w.desc)}</div>
-          <div class="win-meta">
-            <span class="card-badge">Evidence: ${escapeHtml(w.evidence || "")}</span>
-          </div>
-        </div>
-      `
-      )
-      .join("");
-
-    // filter buttons
-    $$(".filter-btn[data-comp]").forEach((b) => {
-      b.addEventListener("click", () => {
-        $$(".filter-btn[data-comp]").forEach((x) => x.classList.remove("active"));
-        b.classList.add("active");
-        renderBrag(window.DRI_DATA);
-      });
-    });
-
-    // add win modal
-    const modal = $("#add-win-modal");
-    const close = () => (modal.style.display = "none");
-    $("#brag-add").addEventListener("click", () => (modal.style.display = "flex"));
-    modal.querySelector(".modal-overlay").addEventListener("click", close);
-    modal.querySelector(".modal-close").addEventListener("click", close);
-
-    $("#win-save").addEventListener("click", () => {
-      const title = $("#win-title").value.trim();
-      const desc = $("#win-desc").value.trim();
-      const comp = $("#win-comp").value;
-      const evidence = $("#win-evidence").value.trim();
-      if (!title || !desc) return;
-      window.DRI_DATA.wins.unshift({
-        id: "w-" + Math.random().toString(16).slice(2, 8),
-        title,
-        desc,
-        comp,
-        evidence,
-        when: "Just now"
-      });
-      $("#win-title").value = "";
-      $("#win-desc").value = "";
-      $("#win-evidence").value = "";
-      close();
-      renderBrag(window.DRI_DATA);
-    });
-
-    // year-end review generator
-    $("#brag-generate-review").addEventListener("click", () => {
-      const grouped = (window.DRI_DATA.wins || []).reduce((acc, w) => {
-        (acc[w.comp] ||= []).push(w);
-        return acc;
-      }, {});
-
-      const lines = [
-        "Year-End Review (demo)",
-        "",
-        "Note: This draft uses only items logged in the Brag Board. Replace demo items and attach evidence links."
-      ];
-      for (const [comp, items] of Object.entries(grouped)) {
-        lines.push("", comp.toUpperCase());
-        for (const it of items) {
-          lines.push(`- ${it.title} | Evidence: ${it.evidence || "(add link)"}`);
-        }
-      }
-      alert(lines.join("\n"));
-    });
-  }
-
-  function renderDecisions(data) {
-    const list = $("#decision-list");
-    const filter = $(".filter-btn.active[data-dtype]")?.dataset.dtype || "all";
-
-    const map = {
-      "p-level": "P-Level Classification",
-      "go-nogo": "Go/No-Go",
-      resource: "Resource Tradeoff",
-      escalation: "Escalation"
+  // Workstreams filters
+  qsa('#workstreams .filter-btn').forEach(btn => {
+    btn.onclick = () => {
+      qsa('#workstreams .filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderAll('workstreams');
     };
+  });
 
-    const rows = (data.decisions || []).filter((d) => !isSnoozed("dec", d.id));
-    const filtered = filter === "all" ? rows : rows.filter((d) => d.type === map[filter]);
+  qs('#ws-sort').onchange = () => renderAll('workstreams');
+}
 
-    list.innerHTML = filtered
-      .map(
-        (d) => `
-        <div class="decision-item" data-decision="${escapeHtml(d.id)}">
-          <div class="flex justify-between items-center">
-            <div>
-              <div class="decision-title">${escapeHtml(d.title)}</div>
-              <div class="text-muted" style="margin-top:6px;">${escapeHtml(d.type)} | ${escapeHtml(d.when || "")}</div>
-            </div>
-            <button class="btn btn-sm btn-secondary" data-snooze-dec="${escapeHtml(d.id)}">Not Relevant</button>
+function deriveRisks(init) {
+  const risks = [];
+  const remaining = (init.checklist || []).filter(c => !c.done);
+  const d = daysUntil(init.deadline);
+  if (d <= 3 && remaining.length >= 2) risks.push('Timeline pressure: multiple incomplete checklist items with <=3 days remaining.');
+  if (!init.artifacts?.some(a => a.type.toLowerCase().includes('go/no-go') && a.status !== 'Missing')) risks.push('Artifact gap: Go/No-Go missing or incomplete.');
+  if (!init.rapid?.decide) risks.push('RAPID risk: Decide role not assigned.');
+  return risks.slice(0, 3);
+}
+
+function renderCommsQueue() {
+  function threadRow(item, kind) {
+    const init = initiatives.find(i => i.id === item.initiativeId);
+    const p = init?.pLevel || 'P2';
+
+    const rightMeta = kind === 'open'
+      ? `<span class="card-badge">+${item.newCount} new</span>${item.decisionMade ? '<span class="card-badge" style="background:rgba(239,68,68,0.15);color:var(--accent-red)">Decision made</span>' : ''}`
+      : kind === 'pro'
+      ? `<span class="confidence-badge ${item.confidence.toLowerCase().replace(' ', '-')}">${escapeHtml(item.confidence)}</span>`
+      : `<span class="card-badge">${escapeHtml(item.urgency)}</span>`;
+
+    const extra = kind === 'pro'
+      ? `<div class="thread-sub">Signal: ${escapeHtml(item.signal)} · Suggested: ${escapeHtml(item.talkingPoint)}</div>`
+      : kind === 'open'
+      ? `<div class="thread-sub">Catch-up: ${escapeHtml(item.summary)}</div>`
+      : `<div class="thread-sub">${escapeHtml(item.sender)} in ${escapeHtml(item.channel)} · ${escapeHtml(item.ts)} · ${escapeHtml(item.initiativeId)}</div>`;
+
+    const preview = kind === 'open' ? item.summary : item.preview;
+
+    return `
+      <div class="thread">
+        <div class="thread-header">
+          <div class="thread-title truncate">
+            <span class="p-badge ${pClass(p)}">${escapeHtml(p)}</span>
+            <span class="truncate">${escapeHtml(init?.name || 'Unknown initiative')}</span>
           </div>
-          <div class="decision-body">${escapeHtml(d.body || "")}</div>
-          <div class="decision-meta">
-            ${d.initiativeId ? `<span class="card-badge">${escapeHtml(d.initiativeId)}</span>` : ""}
-            ${d.tenet ? `<span class="card-badge">Tenet: ${escapeHtml(d.tenet)}</span>` : ""}
-          </div>
-          <div class="output-card" style="margin-top:12px;">
-            <h4>Expected vs actual</h4>
-            <pre>Expected: ${escapeHtml(d.expected || "")}
-Actual: ${escapeHtml(d.actual || "")}</pre>
-          </div>
+          <div class="flex gap-8 items-center">${rightMeta}</div>
         </div>
-      `
-      )
-      .join("");
-
-    // filters
-    $$(".filter-btn[data-dtype]").forEach((b) => {
-      b.addEventListener("click", () => {
-        $$(".filter-btn[data-dtype]").forEach((x) => x.classList.remove("active"));
-        b.classList.add("active");
-        renderDecisions(window.DRI_DATA);
-      });
-    });
-
-    list.querySelectorAll("button[data-snooze-dec]").forEach((b) => {
-      b.addEventListener("click", () => {
-        snooze("dec", b.dataset.snoozeDec);
-        renderAll();
-      });
-    });
-
-    // patterns (demo)
-    $("#patterns-content").innerHTML = `
-      <div class="text-muted">Demo pattern engine. With real Jira + KPI data, this should compare predicted outcomes to measured outcomes and highlight systematic bias.</div>
-      <div class="mt-12">
-        <div class="card-badge">Example: Under-estimated L&D timeline by ~30% (placeholder)</div>
+        ${extra}
+        <div class="thread-preview">${escapeHtml(preview)}</div>
+        <div class="thread-actions">
+          <button class="btn btn-primary btn-sm" data-draft="${escapeHtml(kind)}::${escapeHtml(item.id)}"><i class="fas fa-pen"></i> Draft Response</button>
+          <button class="btn btn-secondary btn-sm" data-snooze-comms="${escapeHtml(item.id)}"><i class="fas fa-clock"></i> Not Relevant</button>
+        </div>
       </div>
     `;
   }
 
-  function renderAll() {
-    const data = window.DRI_DATA;
-    if (!data) return;
+  const unreplied = comms.unreplied.filter(m => !store.snoozed.comms.has(m.id));
+  const open = comms.openThreads.filter(m => !store.snoozed.comms.has(m.id));
+  const pro = comms.proactive.filter(m => !store.snoozed.comms.has(m.id));
 
-    renderMissionControl(data);
-    renderWorkstreams(data);
-    renderComms(data);
-    renderSentiment(data);
-    renderWorldview(data);
-    renderRecommender(data);
-    // intake and gap and qbr are wired once
-    renderBrag(data);
-    renderDecisions(data);
+  qs('#unreplied-list').innerHTML = unreplied.map(i => threadRow(i, 'unreplied')).join('');
+  qs('#open-threads-list').innerHTML = open.map(i => threadRow(i, 'open')).join('');
+  qs('#proactive-list').innerHTML = pro.map(i => threadRow(i, 'pro')).join('');
 
-    // Update nav badges (rough)
-    $("#nav-badge-ws").textContent = String((data.initiatives || []).filter((i) => i.lifecycle === "Active").length);
-    $("#nav-badge-cq").textContent = String((data.comms?.unreplied || []).filter((t) => !isSnoozed("comms", t.id)).length);
-    $("#nav-badge-ai").textContent = String((data.recommender || []).filter((r) => !isSnoozed("rec", r.id)).length);
-    $("#nav-badge-cs").textContent = String((data.collaborators || []).filter((c) => ["Cooling", "Drifting", "Strained"].includes(c.state)).length);
-  }
-
-  document.addEventListener("DOMContentLoaded", () => {
-    // wire one-time event handlers
-    renderIntake();
-    renderGapAnalysis();
-    renderQBR(window.DRI_DATA);
-
-    // workstreams filter default active
-    // Ensure filter button active state exists
-    const wsFilter = $(".filter-btn[data-filter='active-measuring']");
-    if (wsFilter) wsFilter.classList.add("active");
-
-    renderAll();
+  qsa('[data-snooze-comms]').forEach(btn => {
+    btn.onclick = () => snooze('comms', btn.getAttribute('data-snooze-comms'));
   });
 
-  // expose for rerender
-  window.DRI_RENDER = { renderAll };
-  // internal helper for this module
-  window.renderAll = renderAll;
-})();
+  qsa('[data-draft]').forEach(btn => {
+    btn.onclick = () => {
+      alert('Demo: generates a concise Slack draft under 200 words, aligned to P-level urgency.');
+    };
+  });
+}
+
+function renderCollaboratorSentiment() {
+  const tier = qs('#collaborator-sentiment .filter-btn.active')?.getAttribute('data-tier') || 'role';
+  const query = (qs('#collab-search')?.value || '').toLowerCase().trim();
+
+  let items = collaborators;
+
+  if (tier === 'org') {
+    const byOrg = new Map();
+    for (const c of collaborators) {
+      const k = c.tier.org;
+      const arr = byOrg.get(k) || [];
+      arr.push(c);
+      byOrg.set(k, arr);
+    }
+    items = [...byOrg.entries()].map(([org, arr]) => aggregateSentiment(org, 'Org', arr));
+  } else if (tier === 'role') {
+    const byRole = new Map();
+    for (const c of collaborators) {
+      const k = c.tier.role;
+      const arr = byRole.get(k) || [];
+      arr.push(c);
+      byRole.set(k, arr);
+    }
+    items = [...byRole.entries()].map(([role, arr]) => aggregateSentiment(role, 'Role', arr));
+  } else {
+    items = collaborators.map(c => ({
+      id: c.id,
+      name: c.tier.individual,
+      subtitle: `${c.tier.role} · ${c.tier.org}`,
+      state: c.state,
+      composite: c.composite,
+      dims: c.dims,
+      recommendation: c.recommendation
+    }));
+  }
+
+  if (query) {
+    items = items.filter(i => (i.name + ' ' + i.subtitle).toLowerCase().includes(query));
+  }
+
+  const grid = qs('#sentiment-grid');
+  grid.innerHTML = items.map(i => `
+    <div class="sentiment-card" data-sent="${escapeHtml(i.id)}">
+      <div class="sentiment-header">
+        <div style="min-width:0">
+          <div class="sentiment-name truncate">${escapeHtml(i.name)}</div>
+          <div class="sentiment-role truncate">${escapeHtml(i.subtitle)}</div>
+        </div>
+        <span class="sentiment-badge ${i.state.toLowerCase()}">${escapeHtml(i.state)}</span>
+      </div>
+      <div class="dim-grid">
+        <div class="k">Composite</div><div style="font-weight:800">${i.composite.toFixed(1)}</div>
+        <div class="k">Responsiveness</div><div>${i.dims.responsiveness.toFixed(1)}</div>
+        <div class="k">Reliability</div><div>${i.dims.reliability.toFixed(1)}</div>
+      </div>
+      ${i.recommendation ? `<div class="mt-12 text-secondary" style="font-size:0.85rem; line-height:1.35">Action: ${escapeHtml(i.recommendation)}</div>` : ''}
+    </div>
+  `).join('');
+
+  qsa('#collaborator-sentiment .filter-btn').forEach(btn => {
+    btn.onclick = () => {
+      qsa('#collaborator-sentiment .filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderAll('collaborator-sentiment');
+    };
+  });
+
+  qs('#collab-search').oninput = () => renderAll('collaborator-sentiment');
+
+  // Modal
+  qsa('[data-sent]').forEach(card => {
+    card.onclick = () => {
+      const id = card.getAttribute('data-sent');
+      const item = collaborators.find(c => c.id === id);
+      if (!item) return;
+
+      const modal = qs('#sentiment-modal');
+      const body = qs('#sentiment-modal-body');
+      body.innerHTML = `
+        <h3 style="margin-bottom:8px">${escapeHtml(item.tier.individual)}</h3>
+        <div class="text-muted" style="margin-bottom:12px">Private sentiment details. Do not share externally.</div>
+        <div class="output-kv">
+          <div class="k">Org</div><div>${escapeHtml(item.tier.org)}</div>
+          <div class="k">Role</div><div>${escapeHtml(item.tier.role)}</div>
+          <div class="k">State</div><div><span class="sentiment-badge ${item.state.toLowerCase()}">${escapeHtml(item.state)}</span></div>
+          <div class="k">Composite</div><div>${item.composite.toFixed(1)} (1.0-5.0)</div>
+          <div class="k">Responsiveness</div><div>${item.dims.responsiveness.toFixed(1)}</div>
+          <div class="k">Engagement Depth</div><div>${item.dims.engagement.toFixed(1)}</div>
+          <div class="k">Proactivity</div><div>${item.dims.proactivity.toFixed(1)}</div>
+          <div class="k">Reliability</div><div>${item.dims.reliability.toFixed(1)}</div>
+          <div class="k">Tone Alignment</div><div>${item.dims.tone.toFixed(1)}</div>
+        </div>
+        ${item.recommendation ? `<div class="mt-16"><div style="font-weight:800;margin-bottom:6px">Recommended action</div><div class="text-secondary">${escapeHtml(item.recommendation)}</div></div>` : ''}
+        <div class="mt-16">
+          <button class="btn btn-secondary" id="draft-reengage"><i class="fas fa-pen"></i> Draft re-engagement message</button>
+        </div>
+      `;
+
+      qs('#draft-reengage').onclick = () => alert('Demo: drafts a message that leads with an unblock and a clear ask.');
+
+      modal.style.display = 'flex';
+    };
+  });
+}
+
+function aggregateSentiment(name, label, arr) {
+  const avg = (k) => arr.reduce((s, x) => s + x.dims[k], 0) / arr.length;
+  const composite = arr.reduce((s, x) => s + x.composite, 0) / arr.length;
+  const state = composite >= 4.5 ? 'Strong'
+    : composite >= 3.5 ? 'Stable'
+    : composite >= 2.5 ? 'Cooling'
+    : composite >= 1.5 ? 'Drifting'
+    : 'Strained';
+
+  return {
+    id: `${label}:${name}`,
+    name,
+    subtitle: `${label} aggregate · ${arr.length} people`,
+    state,
+    composite,
+    dims: {
+      responsiveness: avg('responsiveness'),
+      engagement: avg('engagement'),
+      proactivity: avg('proactivity'),
+      reliability: avg('reliability'),
+      tone: avg('tone')
+    },
+    recommendation: ['Cooling','Drifting','Strained'].includes(state)
+      ? 'Take a targeted unblock action: send a concrete ask, propose 2 options, and set a response deadline.'
+      : null
+  };
+}
+
+function renderWorldview() {
+  const activeType = qs('#worldview .filter-btn.active')?.getAttribute('data-wv') || 'all';
+  let items = worldviewItems.filter(w => !store.snoozed.worldview.has(w.id));
+  if (activeType !== 'all') {
+    items = items.filter(w => w.type.toLowerCase() === activeType);
+  }
+
+  const grid = qs('#worldview-grid');
+  grid.innerHTML = items.map(w => `
+    <div class="wv-card">
+      <div class="flex justify-between items-center gap-12">
+        <span class="type-badge ${w.type.toLowerCase()}">${escapeHtml(w.type)}</span>
+        <button class="btn btn-secondary btn-sm" data-snooze-wv="${escapeHtml(w.id)}"><i class="fas fa-clock"></i> Not Relevant</button>
+      </div>
+      <div class="wv-title">${escapeHtml(w.title)}</div>
+      <div class="wv-summary">${escapeHtml(w.summary)}</div>
+      <div class="wv-footer">
+        <div class="text-muted" style="font-size:0.8rem">Relevance: <span class="text-secondary">${escapeHtml(w.relevance)}</span></div>
+      </div>
+      <div class="wv-so-what"><b>So what:</b> ${escapeHtml(w.soWhat)}</div>
+    </div>
+  `).join('');
+
+  qsa('#worldview .filter-btn').forEach(btn => {
+    btn.onclick = () => {
+      qsa('#worldview .filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderAll('worldview');
+    };
+  });
+
+  qsa('[data-snooze-wv]').forEach(btn => {
+    btn.onclick = () => snooze('worldview', btn.getAttribute('data-snooze-wv'));
+  });
+}
+
+function renderRecommender() {
+  const list = qs('#recommender-list');
+  const items = recommendations.filter(r => !store.snoozed.recs.has(r.id)).slice(0, 7);
+  list.innerHTML = items.map(r => {
+    const init = initiatives.find(i => i.id === r.initiativeId);
+    return `
+      <div class="rec-row">
+        <div class="top">
+          <div class="title">${escapeHtml(r.title)}</div>
+          <div class="flex gap-8 items-center">
+            <span class="p-badge ${pClass(init?.pLevel || 'P2')}">${escapeHtml(init?.pLevel || 'P2')}</span>
+            <span class="card-badge">Effort: ${escapeHtml(r.effort)}</span>
+          </div>
+        </div>
+        <div class="meta">
+          <span>Why now: ${escapeHtml(r.whyNow)}</span>
+          <span>Tenet: ${escapeHtml(r.tenet)}</span>
+          <span>Initiative: ${escapeHtml(r.initiativeId)}</span>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary btn-sm" data-gen="${escapeHtml(r.id)}"><i class="fas fa-wand-magic-sparkles"></i> Generate</button>
+          <button class="btn btn-secondary btn-sm" data-snooze-rec="${escapeHtml(r.id)}"><i class="fas fa-clock"></i> Not Relevant</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  qsa('[data-snooze-rec]').forEach(btn => {
+    btn.onclick = () => snooze('rec', btn.getAttribute('data-snooze-rec'));
+  });
+  qsa('[data-gen]').forEach(btn => {
+    btn.onclick = () => alert('Demo: “Generate” would produce a complete deliverable and write back to Jira.');
+  });
+}
+
+function initIntake() {
+  qs('#intake-generate').onclick = () => {
+    const text = (qs('#intake-text').value || '').trim();
+    if (!text) return alert('Paste a change description first.');
+    const out = qs('#intake-output');
+    out.style.display = 'block';
+    out.innerHTML = buildIntakeOutput(text);
+  };
+  qs('#intake-clear').onclick = () => {
+    qs('#intake-text').value = '';
+    qs('#intake-output').style.display = 'none';
+    qs('#intake-output').innerHTML = '';
+  };
+}
+
+function buildIntakeOutput(text) {
+  // Demo heuristics only
+  const lower = text.toLowerCase();
+  const p = lower.includes('p0') ? 'P0'
+    : (lower.includes('launch') || lower.includes('legal') || lower.includes('marketing')) ? 'P1'
+    : lower.includes('macro') ? 'P3'
+    : 'P2';
+
+  const affected = [];
+  if (lower.includes('bank')) affected.push('Banking');
+  if (lower.includes('dispute')) affected.push('Disputes');
+  if (lower.includes('fraud')) affected.push('Fraud');
+  if (affected.length === 0) affected.push('TBD');
+
+  const rapid = {
+    recommend: 'Product / Ops',
+    agree: p === 'P0' ? 'Legal + Quality' : 'Quality',
+    perform: 'Content Ops + L&D + BPO',
+    input: 'BPO Ops + VMO + Product',
+    decide: 'Strategy Lead, Operational Readiness'
+  };
+
+  const goNoGo = [
+    'Jira epic created with P-level label and deadline',
+    'RAPID assigned and acknowledged (Decide, Agree, Perform)',
+    'Training brief approved and scheduled for all sites',
+    'Comms draft reviewed by Agree role(s)',
+    'Advocate comprehension check defined (pass threshold)',
+    'KB/macros updated and published',
+    'Measurement plan includes 7-day leading + 30-day lagging metrics',
+    'Abort triggers defined and escalation path confirmed',
+    'BPO delivery plan confirmed (sites, dates, coverage)',
+    'Go/No-Go meeting held and decision logged'
+  ];
+
+  const measurement = {
+    leading7: ['Training completion %', 'Comprehension pass rate', 'Top driver tags', 'Escalations volume'],
+    lagging30: ['FCR', 'CSAT', 'AHT', 'QA score'],
+    abort: ['FCR down >2pp for 3 consecutive days', 'QA down >3pp vs baseline', 'Escalations spike >25% week-over-week']
+  };
+
+  const slackMsg = `Hi team. For this change, I’m classifying it as ${p} based on customer impact and readiness risk.\n\nNext steps today: (1) confirm RAPID (Decide/Agree/Perform) in Jira, (2) align deadline and launch guardrails, (3) lock training modality and success criteria.\n\nPlease reply with any blockers by EOD so we can keep the readiness plan on track.`;
+
+  return `
+    <div class="output-card">
+      <h4>P-level classification</h4>
+      <div class="output-kv">
+        <div class="k">P-level</div><div><span class="p-badge ${pClass(p)}">${p}</span></div>
+        <div class="k">Rationale</div><div class="text-secondary">Demo logic. Replace with Playbook P-level framework once wired to your playbook requirements.</div>
+        <div class="k">Affected LOBs</div><div class="text-secondary">${affected.join(', ')}</div>
+        <div class="k">Risk if advocates are unprepared</div><div class="text-secondary">Incorrect guidance, increased escalations, QA variance, and potential compliance exposure depending on change type.</div>
+      </div>
+    </div>
+
+    <div class="output-card">
+      <h4>RAPID assignment</h4>
+      <div class="output-kv">
+        <div class="k">Recommend</div><div>${escapeHtml(rapid.recommend)}</div>
+        <div class="k">Agree</div><div>${escapeHtml(rapid.agree)}</div>
+        <div class="k">Perform</div><div>${escapeHtml(rapid.perform)}</div>
+        <div class="k">Input</div><div>${escapeHtml(rapid.input)}</div>
+        <div class="k">Decide</div><div>${escapeHtml(rapid.decide)}</div>
+      </div>
+    </div>
+
+    <div class="output-card">
+      <h4>Stakeholder Slack message (ready to send)</h4>
+      <textarea style="min-height:140px">${escapeHtml(slackMsg)}</textarea>
+    </div>
+
+    <div class="output-card">
+      <h4>Training brief</h4>
+      <div class="output-list">
+        <div class="li"><b>Modality:</b> Microlearning + 5-question comprehension check; live Q&A if P0/P1.</div>
+        <div class="li"><b>Timeline:</b> Draft within 48h; delivery 2-5 days pre-launch; refresh macros same day as training publish.</div>
+        <div class="li"><b>Prereqs:</b> final policy/UX spec, approved customer language, updated KB.</div>
+        <div class="li"><b>Success criteria:</b> completion >= 95% (sites), pass rate >= 85%, no new critical QA failure mode introduced.</div>
+      </div>
+    </div>
+
+    <div class="output-card">
+      <h4>Go/No-Go checklist (binary criteria)</h4>
+      <div class="output-list">
+        ${goNoGo.map(x => `<div class="li">□ ${escapeHtml(x)}</div>`).join('')}
+      </div>
+    </div>
+
+    <div class="output-card">
+      <h4>Measurement plan</h4>
+      <div class="output-list">
+        <div class="li"><b>7-day leading:</b> ${measurement.leading7.join(', ')}</div>
+        <div class="li"><b>30-day lagging:</b> ${measurement.lagging30.join(', ')}</div>
+        <div class="li"><b>Abort triggers:</b> ${measurement.abort.join('; ')}</div>
+        <div class="li"><b>Success definition:</b> improve or maintain baseline KPIs while reducing avoidable escalations for the change area.</div>
+      </div>
+      <div class="mt-12">
+        <button class="btn btn-primary"><i class="fas fa-plus"></i> Push to Jira (demo)</button>
+        <button class="btn btn-secondary" onclick="alert('Demo: would create Jira epic and attach artifacts.')"><i class="fas fa-link"></i> Attach artifacts</button>
+      </div>
+    </div>
+  `;
+}
+
+function initGapAnalysis() {
+  qs('#gap-analyze').onclick = () => {
+    const text = (qs('#gap-text').value || '').trim();
+    if (!text) return alert('Paste a plan first.');
+    const out = qs('#gap-output');
+    out.style.display = 'block';
+    out.innerHTML = buildGapOutput(text);
+  };
+  qs('#gap-clear').onclick = () => {
+    qs('#gap-text').value = '';
+    qs('#gap-output').style.display = 'none';
+    qs('#gap-output').innerHTML = '';
+  };
+}
+
+function buildGapOutput(text) {
+  // Demo red-team: checks for keywords
+  const lower = text.toLowerCase();
+  const hasRapid = lower.includes('rapid') || (lower.includes('decide') && lower.includes('perform'));
+  const hasMeasure = lower.includes('measure') || lower.includes('kpi') || lower.includes('csat') || lower.includes('fcr');
+  const hasChecklist = lower.includes('checklist') || lower.includes('go/no-go') || lower.includes('go no go');
+  const hasComms = lower.includes('comms') || lower.includes('slack') || lower.includes('announcement');
+  const hasTimeline = lower.includes('date') || lower.includes('deadline') || lower.match(/\b20\d{2}-\d{2}-\d{2}\b/);
+
+  const gaps = [];
+  if (!hasRapid) gaps.push('RAPID completeness missing. Assign Recommend/Agree/Perform/Input/Decide explicitly.');
+  if (!hasChecklist) gaps.push('Go/No-Go criteria missing or non-binary. Add 8-10 measurable criteria.');
+  if (!hasMeasure) gaps.push('Measurement plan missing. Define 7-day leading and 30-day lagging metrics plus abort triggers.');
+  if (!hasComms) gaps.push('Communication coverage unclear. Add comms plan by audience and timing (48h pre-read for forums).');
+  if (!hasTimeline) gaps.push('Timeline realism risk: no explicit deadline or dependencies mapped.');
+
+  const strengths = [];
+  if (hasTimeline) strengths.push('Timeline signals present.');
+  if (hasComms) strengths.push('Comms considered.');
+  if (hasMeasure) strengths.push('KPIs/measurement referenced.');
+
+  const confidence = gaps.length <= 1 ? 'High' : gaps.length <= 3 ? 'Medium' : 'Low';
+
+  return `
+    <div class="output-card">
+      <h4>Strengths</h4>
+      <div class="output-list">
+        ${(strengths.length ? strengths : ['No explicit strengths detected in demo heuristic.']).map(s => `<div class="li">${escapeHtml(s)}</div>`).join('')}
+      </div>
+    </div>
+    <div class="output-card">
+      <h4>Critical Gaps</h4>
+      <div class="output-list">
+        ${(gaps.length ? gaps : ['No critical gaps detected by demo heuristic.']).map(g => `<div class="li">${escapeHtml(g)}</div>`).join('')}
+      </div>
+    </div>
+    <div class="output-card">
+      <h4>Risks</h4>
+      <div class="output-list">
+        <div class="li">Readiness risk: advocates may lack consistent guidance, increasing escalations and QA variance.</div>
+        <div class="li">Governance risk: decisions may be made without correct RAPID roles engaged.</div>
+      </div>
+    </div>
+    <div class="output-card">
+      <h4>Missing Artifacts</h4>
+      <div class="output-list">
+        <div class="li">Training brief (modality, timeline, prereqs, success criteria)</div>
+        <div class="li">Go/No-Go checklist (8-10 binary criteria)</div>
+        <div class="li">Measurement plan (7-day leading, 30-day lagging, abort triggers)</div>
+        <div class="li">Stakeholder comms draft (Slack-ready)</div>
+      </div>
+    </div>
+    <div class="output-card">
+      <h4>Confidence</h4>
+      <div class="text-secondary">${escapeHtml(confidence)} (demo)</div>
+    </div>
+  `;
+}
+
+function initQBR() {
+  qs('#qbr-generate').onclick = () => {
+    const quarter = qs('#qbr-quarter').value;
+    const out = qs('#qbr-output');
+    out.style.display = 'block';
+    out.innerHTML = buildQbrDraft(quarter);
+  };
+}
+
+function buildQbrDraft(quarter) {
+  const active = initiatives.filter(i => i.lifecycle === 'Active');
+  const measuring = initiatives.filter(i => i.lifecycle === 'In Measurement');
+  const closed = initiatives.filter(i => i.lifecycle === 'Closed');
+
+  const rows = initiatives.map(i => {
+    const prog = calcInitiativeProgress(i);
+    const lc = formatLifecycle(i.lifecycle).label;
+    const kpi = i.kpiImpact ? Object.entries(i.kpiImpact).map(([k,v]) => `${k}: ${v}`).join(', ') : 'TBD';
+    return `<tr>
+      <td>${escapeHtml(i.id)}</td>
+      <td>${escapeHtml(i.name)}</td>
+      <td><span class="p-badge ${pClass(i.pLevel)}">${escapeHtml(i.pLevel)}</span></td>
+      <td>${escapeHtml(lc)}</td>
+      <td>${escapeHtml(i.deadline)}</td>
+      <td>${prog}%</td>
+      <td class="text-secondary">${escapeHtml(kpi)}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <h2>Operational Readiness QBR Draft - ${escapeHtml(quarter)}</h2>
+
+    <h3>Executive Summary</h3>
+    <p>This draft is built from demo data. In production, it pulls initiative status from Jira and KPI results from Snowflake. Use this section to state the quarter’s readiness outcomes, risks managed, and what shipped.</p>
+    <ul>
+      <li><b>Active work:</b> ${active.length} initiatives in flight.</li>
+      <li><b>In Measurement:</b> ${measuring.length} initiatives in 30-day KPI tracking.</li>
+      <li><b>Closed:</b> ${closed.length} initiatives completed with artifacts archived.</li>
+    </ul>
+
+    <h3>Program Results Table</h3>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th><th>Initiative</th><th>P</th><th>Lifecycle</th><th>Deadline</th><th>Progress</th><th>KPI impact</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+      </tbody>
+    </table>
+
+    <h3>Start / Stop / Continue</h3>
+    <ul>
+      <li><b>Start:</b> enforce Go/No-Go checklists earlier for P0/P1 items.</li>
+      <li><b>Stop:</b> shipping without explicit abort triggers and a documented escalation path.</li>
+      <li><b>Continue:</b> microlearning + comprehension checks as default for policy and UX changes.</li>
+    </ul>
+
+    <h3>Forward Pipeline</h3>
+    <p class="text-secondary">In production, this section is generated by querying Jira for upcoming epics and intake tickets, then grouping by LOB and P-level.</p>
+  `;
+}
+
+function renderBragBoard() {
+  const filter = qs('#brag-board .filter-btn.active')?.getAttribute('data-comp') || 'all';
+  let items = [...wins];
+  if (filter !== 'all') items = items.filter(w => w.comp === filter);
+
+  const grid = qs('#brag-grid');
+  grid.innerHTML = items.map(w => `
+    <div class="win-card">
+      <div class="flex justify-between items-center gap-12">
+        <span class="comp-badge ${escapeHtml(w.comp)}">${escapeHtml(labelComp(w.comp))}</span>
+        <span class="text-muted" style="font-size:0.8rem">${escapeHtml(w.date)}</span>
+      </div>
+      <div class="win-title">${escapeHtml(w.title)}</div>
+      <div class="win-desc">${escapeHtml(w.desc)}</div>
+      <div class="win-evidence">Evidence: ${escapeHtml(w.evidence)}</div>
+    </div>
+  `).join('');
+
+  qsa('#brag-board .filter-btn').forEach(btn => {
+    btn.onclick = () => {
+      qsa('#brag-board .filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderAll('brag-board');
+    };
+  });
+
+  qs('#brag-add').onclick = () => {
+    const m = qs('#add-win-modal');
+    m.style.display = 'flex';
+  };
+
+  qs('#win-save').onclick = () => {
+    const title = qs('#win-title').value.trim();
+    const desc = qs('#win-desc').value.trim();
+    const comp = qs('#win-comp').value;
+    const evidence = qs('#win-evidence').value.trim() || 'TBD';
+    if (!title || !desc) return alert('Title and description required.');
+
+    wins.unshift({ id: `win${Date.now()}`, title, desc, comp, evidence, date: new Date().toISOString().slice(0,10) });
+    qs('#add-win-modal').style.display = 'none';
+    qs('#win-title').value = '';
+    qs('#win-desc').value = '';
+    qs('#win-evidence').value = '';
+    renderAll('brag-board');
+  };
+
+  qs('#brag-generate-review').onclick = () => {
+    alert('Demo: would search for Block review template and synthesize wins with evidence links.');
+  };
+}
+
+function labelComp(comp) {
+  return {
+    'data-acumen': 'Data Acumen',
+    'strategic': 'Strategic Thinking',
+    'cross-func': 'Cross-Functional Influence',
+    'operational': 'Operational Execution',
+    'communication': 'Communication',
+    'drive-results': 'Drive Results'
+  }[comp] || comp;
+}
+
+function renderDecisionLog() {
+  const filter = qs('#decision-log .filter-btn.active')?.getAttribute('data-dtype') || 'all';
+  let items = [...decisions];
+  if (filter !== 'all') items = items.filter(d => d.type === filter);
+
+  const list = qs('#decision-list');
+  list.innerHTML = items.map(d => `
+    <div class="decision-item">
+      <div class="head">
+        <div class="title">${escapeHtml(d.title)}</div>
+        <span class="card-badge">${escapeHtml(d.type)}</span>
+      </div>
+      <div class="text-muted" style="margin-top:6px">Decided: ${escapeHtml(d.decidedAt)}</div>
+      <div class="body">${escapeHtml(d.details)}</div>
+    </div>
+  `).join('');
+
+  qsa('#decision-log .filter-btn').forEach(btn => {
+    btn.onclick = () => {
+      qsa('#decision-log .filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderAll('decision-log');
+    };
+  });
+
+  qs('#decision-add').onclick = () => alert('Demo: add a decision with alternatives, tenet alignment, expected vs actual outcome.');
+
+  // Patterns (demo)
+  qs('#patterns-content').innerHTML = `
+    <div class="text-secondary" style="line-height:1.45">
+      Demo placeholder. In production, this analyzes decision outcomes over time (predicted vs actual) and surfaces recurring gaps.
+      Example pattern: “Go/No-Go checklists are created late for P1 items; shift artifact creation earlier.”
+    </div>
+    <div class="mt-12"><button class="btn btn-secondary btn-sm" onclick="unsnoozeAll()"><i class=\"fas fa-rotate\"></i> Reset snoozed items</button></div>
+  `;
+}
+
+function renderAll(panelId) {
+  // Always render dependent panels since they share data
+  const p = panelId || (qs('.panel.active')?.id);
+
+  // Render on demand to avoid extra DOM churn
+  if (!panelId || panelId === 'mission-control') renderMissionControl();
+  if (!panelId || panelId === 'workstreams') renderWorkstreams();
+  if (!panelId || panelId === 'comms-queue') renderCommsQueue();
+  if (!panelId || panelId === 'collaborator-sentiment') renderCollaboratorSentiment();
+  if (!panelId || panelId === 'worldview') renderWorldview();
+  if (!panelId || panelId === 'ai-recommender') renderRecommender();
+  if (!panelId || panelId === 'brag-board') renderBragBoard();
+  if (!panelId || panelId === 'decision-log') renderDecisionLog();
+
+  // Ensure intake/gap/qbr initializers are attached once
+  if (!window.__init_done) {
+    initIntake();
+    initGapAnalysis();
+    initQBR();
+    window.__init_done = true;
+  }
+
+  // Update nav badges (demo)
+  qs('#nav-badge-ws').textContent = `${initiatives.filter(i => i.lifecycle === 'Active').length}`;
+  qs('#nav-badge-cq').textContent = `${comms.unreplied.filter(m => !store.snoozed.comms.has(m.id)).length}`;
+  qs('#nav-badge-ai').textContent = `${recommendations.filter(r => !store.snoozed.recs.has(r.id)).length}`;
+}
