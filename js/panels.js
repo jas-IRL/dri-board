@@ -46,7 +46,29 @@ function renderMissionControl() {
 
   // Actions list
   const actionsList = qs('#actions-list');
-  const visibleActions = actionsDueToday.slice(0, 6);
+
+  // Live mode: derive actions due today from incomplete checklist items
+  let actionSource = actionsDueToday;
+  if (window.DRI_LIVE && window.DRI_LIVE.enabled) {
+    const today = new Date().toISOString().slice(0, 10);
+    const derived = [];
+    initiatives
+      .filter(i => i.lifecycle === 'Active')
+      .forEach(i => {
+        (i.checklist || []).filter(c => !c.done && c.due && c.due.slice(0,10) === today).forEach(c => {
+          derived.push({
+            id: `${i.id}::${c.id}`,
+            title: c.text,
+            sub: `Due today · ${i.id}`,
+            pLevel: i.pLevel,
+            initiativeId: i.id
+          });
+        });
+      });
+    if (derived.length) actionSource = derived;
+  }
+
+  const visibleActions = actionSource.slice(0, 6);
   qs('#actions-count').textContent = `${visibleActions.length}`;
   actionsList.innerHTML = visibleActions.map(a => `
     <li class="action-item">
@@ -225,13 +247,27 @@ function renderWorkstreams() {
 
   // Checklist toggles
   qsa('.ws-check-item input[type="checkbox"]').forEach(cb => {
-    cb.onchange = () => {
+    cb.onchange = async () => {
       const li = cb.closest('.ws-check-item');
       const key = li.getAttribute('data-check');
       const [initId, checkId] = key.split('::');
       const init = initiatives.find(i => i.id === initId);
       const item = init?.checklist?.find(c => c.id === checkId);
       if (item) item.done = cb.checked;
+
+      // If live mode and this is a readiness element, persist to backend
+      if (window.DRI_LIVE && window.DRI_LIVE.enabled && item && item.__elementId) {
+        try {
+          await fetch(`${window.DRI_LIVE.apiBase}/api/readiness-elements/${item.__elementId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: cb.checked ? 'Complete' : 'In Progress' })
+          });
+        } catch (e) {
+          // ignore, keep UI state
+        }
+      }
+
       renderAll('workstreams');
       renderAll('mission-control');
     };
@@ -539,18 +575,97 @@ function renderRecommender() {
   });
 }
 
+function _inferPLevel(text) {
+  const lower = (text || '').toLowerCase();
+  return lower.includes('p0') ? 'P0'
+    : (lower.includes('launch') || lower.includes('legal') || lower.includes('marketing') || lower.includes('regulatory')) ? 'P1'
+    : lower.includes('macro') ? 'P3'
+    : 'P2';
+}
+
+function _inferReadinessMode(text) {
+  const lower = (text || '').toLowerCase();
+  if (lower.includes('regulatory') || lower.includes('policy') || lower.includes('cfpb')) return 'Regulatory/Policy';
+  if (lower.includes('intervention') || lower.includes('kpi dip') || lower.includes('performance')) return 'Performance Intervention';
+  if (lower.includes('reactive') || lower.includes('incident') || lower.includes('outage')) return 'Reactive';
+  if (lower.includes('launch') || lower.includes('release') || lower.includes('ga')) return 'Launch Readiness';
+  return 'Operational Change';
+}
+
+function _inferDeadline(text) {
+  // very simple YYYY-MM-DD detector
+  const m = (text || '').match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+  return m ? m[1] : '';
+}
+
+function _inferTitle(text) {
+  const first = (text || '').split(/\n|\.|\!/)[0].trim();
+  return first.length ? first.slice(0, 100) : 'New change';
+}
+
 function initIntake() {
   qs('#intake-generate').onclick = () => {
     const text = (qs('#intake-text').value || '').trim();
     if (!text) return alert('Paste a change description first.');
     const out = qs('#intake-output');
     out.style.display = 'block';
+
+    // store latest intake for button actions
+    window.__last_intake = {
+      text,
+      title: _inferTitle(text),
+      p_level: _inferPLevel(text),
+      readiness_mode: _inferReadinessMode(text),
+      deadline: _inferDeadline(text),
+    };
+
     out.innerHTML = buildIntakeOutput(text);
+
+    // Wire bridge create button if present
+    const btn = qs('#bridge-create-init');
+    if (btn) {
+      btn.onclick = async () => {
+        if (!window.DRI_LIVE || !window.DRI_LIVE.enabled) {
+          alert('Live mode not enabled. Set DRI_API_BASE to use the local backend.');
+          return;
+        }
+        const li = window.__last_intake || {};
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Creating...';
+        try {
+          const res = await fetch(`${window.DRI_LIVE.apiBase}/api/initiatives`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: li.title || 'New change',
+              description: li.text || text,
+              p_level: li.p_level || 'P2',
+              readiness_mode: li.readiness_mode || 'Operational Change',
+              deadline: li.deadline || null,
+              lifecycle: 'Active',
+              seed_elements: true
+            })
+          });
+          if (!res.ok) throw new Error('create failed');
+
+          // refresh data and jump to workstreams
+          await loadLiveInitiatives();
+          setActivePanel('workstreams');
+        } catch (e) {
+          alert('Failed to create initiative in local backend. Is the server running?');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Create Initiative (local)';
+        }
+      };
+    }
   };
+
   qs('#intake-clear').onclick = () => {
     qs('#intake-text').value = '';
     qs('#intake-output').style.display = 'none';
     qs('#intake-output').innerHTML = '';
+    window.__last_intake = null;
   };
 }
 
@@ -650,8 +765,12 @@ function buildIntakeOutput(text) {
         <div class="li"><b>Success definition:</b> improve or maintain baseline KPIs while reducing avoidable escalations for the change area.</div>
       </div>
       <div class="mt-12">
-        <button class="btn btn-primary"><i class="fas fa-plus"></i> Push to Jira (demo)</button>
-        <button class="btn btn-secondary" onclick="alert('Demo: would create Jira epic and attach artifacts.')"><i class="fas fa-link"></i> Attach artifacts</button>
+        ${window.DRI_LIVE && window.DRI_LIVE.enabled
+          ? `<button class="btn btn-primary" id="bridge-create-init"><i class="fas fa-plus"></i> Create Initiative (local)</button>
+             <button class="btn btn-secondary" onclick="setActivePanel('workstreams')"><i class="fas fa-diagram-project"></i> View Workstreams</button>`
+          : `<button class="btn btn-primary"><i class="fas fa-plus"></i> Push to Jira (demo)</button>
+             <button class="btn btn-secondary" onclick="alert('Demo: would create Jira epic and attach artifacts.')"><i class="fas fa-link"></i> Attach artifacts</button>`
+        }
       </div>
     </div>
   `;
@@ -826,14 +945,29 @@ function renderBragBoard() {
     m.style.display = 'flex';
   };
 
-  qs('#win-save').onclick = () => {
+  qs('#win-save').onclick = async () => {
     const title = qs('#win-title').value.trim();
     const desc = qs('#win-desc').value.trim();
     const comp = qs('#win-comp').value;
     const evidence = qs('#win-evidence').value.trim() || 'TBD';
     if (!title || !desc) return alert('Title and description required.');
 
-    wins.unshift({ id: `win${Date.now()}`, title, desc, comp, evidence, date: new Date().toISOString().slice(0,10) });
+    // Live mode: persist to backend
+    if (window.DRI_LIVE && window.DRI_LIVE.enabled) {
+      try {
+        await fetch(`${window.DRI_LIVE.apiBase}/api/wins`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, desc, competency: comp, evidence })
+        });
+        await loadLiveWins();
+      } catch (e) {
+        alert('Failed to save win to local backend.');
+      }
+    } else {
+      wins.unshift({ id: `win${Date.now()}`, title, desc, comp, evidence, date: new Date().toISOString().slice(0,10) });
+    }
+
     qs('#add-win-modal').style.display = 'none';
     qs('#win-title').value = '';
     qs('#win-desc').value = '';
@@ -882,7 +1016,29 @@ function renderDecisionLog() {
     };
   });
 
-  qs('#decision-add').onclick = () => alert('Demo: add a decision with alternatives, tenet alignment, expected vs actual outcome.');
+  qs('#decision-add').onclick = async () => {
+    const title = prompt('Decision title (what was decided)?');
+    if (!title) return;
+    const details = prompt('Details (rationale, alternatives, tenet alignment, expected outcome):') || '';
+    const decision_type = prompt('Type (p-level, go-nogo, resource, escalation, all):', 'all') || 'all';
+
+    if (window.DRI_LIVE && window.DRI_LIVE.enabled) {
+      try {
+        await fetch(`${window.DRI_LIVE.apiBase}/api/decisions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, details, decision_type })
+        });
+        await loadLiveDecisions();
+      } catch (e) {
+        alert('Failed to save decision to local backend.');
+      }
+    } else {
+      decisions.unshift({ id: `d${Date.now()}`, type: decision_type, title, decidedAt: new Date().toISOString().slice(0,10), details });
+    }
+
+    renderAll('decision-log');
+  };
 
   // Patterns (demo)
   qs('#patterns-content').innerHTML = `

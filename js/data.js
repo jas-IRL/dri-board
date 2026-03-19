@@ -291,3 +291,101 @@ function calcOverallReadiness(activeOnly = true) {
   if (!totalW) return 0;
   return Math.round(sum / totalW);
 }
+
+// =============================
+// Live Bridge Mode (local backend)
+// =============================
+
+window.DRI_LIVE = {
+  enabled: false,
+  apiBase: ''
+};
+
+async function bootstrapLiveData() {
+  const apiBase = (window.DRI_CONFIG && window.DRI_CONFIG.API_BASE) ? window.DRI_CONFIG.API_BASE : '';
+  if (!apiBase) return;
+
+  window.DRI_LIVE.enabled = true;
+  window.DRI_LIVE.apiBase = apiBase;
+
+  await Promise.allSettled([
+    loadLiveInitiatives(),
+    loadLiveDecisions(),
+    loadLiveWins(),
+  ]);
+}
+
+function _bridgeRapid(i) {
+  return {
+    recommend: i.rapid_recommend || 'TBD',
+    agree: i.rapid_agree || 'TBD',
+    perform: i.rapid_perform || 'TBD',
+    input: i.rapid_input || 'TBD',
+    decide: i.rapid_decide || 'TBD',
+  };
+}
+
+function _bridgeChecklist(i) {
+  const els = Array.isArray(i.readiness_elements) ? i.readiness_elements : [];
+  return els.map(e => ({
+    id: `el-${e.id}`,
+    text: `${e.readiness_element}${e.what_needs_to_happen ? `: ${e.what_needs_to_happen}` : ''}`,
+    done: e.status === 'Complete',
+    due: e.due_date || i.deadline || '',
+    __elementId: e.id,
+  }));
+}
+
+async function loadLiveInitiatives() {
+  const apiBase = window.DRI_LIVE.apiBase;
+  const res = await fetch(`${apiBase}/api/initiatives`);
+  if (!res.ok) throw new Error('Failed to load initiatives');
+  const json = await res.json();
+  const items = Array.isArray(json.items) ? json.items : [];
+
+  // overwrite global initiatives with a shape the UI expects
+  initiatives = items.map(i => ({
+    id: i.jira_key || i.id,
+    backendId: i.id,
+    name: i.title,
+    pLevel: i.p_level,
+    lifecycle: i.lifecycle,
+    deadline: i.deadline || '',
+    description: i.description || '',
+    rapid: _bridgeRapid(i),
+    artifacts: [],
+    kpiImpact: null,
+    checklist: _bridgeChecklist(i),
+  }));
+}
+
+async function loadLiveDecisions() {
+  const apiBase = window.DRI_LIVE.apiBase;
+  const res = await fetch(`${apiBase}/api/decisions`);
+  if (!res.ok) return;
+  const json = await res.json();
+  const items = Array.isArray(json.items) ? json.items : [];
+  decisions = items.map(d => ({
+    id: d.id,
+    type: d.decision_type || 'all',
+    title: d.title,
+    decidedAt: (d.decided_at || d.created_at || '').slice(0, 10),
+    details: d.details || '',
+  }));
+}
+
+async function loadLiveWins() {
+  const apiBase = window.DRI_LIVE.apiBase;
+  const res = await fetch(`${apiBase}/api/wins`);
+  if (!res.ok) return;
+  const json = await res.json();
+  const items = Array.isArray(json.items) ? json.items : [];
+  wins = items.map(w => ({
+    id: w.id,
+    title: w.title,
+    desc: w.desc,
+    comp: w.competency || 'drive-results',
+    evidence: w.evidence || 'TBD',
+    date: (w.occurred_at || w.created_at || '').slice(0, 10),
+  }));
+}

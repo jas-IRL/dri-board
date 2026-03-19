@@ -138,13 +138,19 @@ function unsnoozeAll() {
   if (typeof renderAll === 'function') renderAll();
 }
 
-function initApp() {
+async function initApp() {
   initNavigation();
   initTabs();
   initModalCloseHandlers();
   initGlobalSearch();
+
+  // If a backend is configured, load live bridge data first
+  if (typeof bootstrapLiveData === 'function') {
+    try { await bootstrapLiveData(); } catch (e) { /* fall back to demo */ }
+  }
+
   // Default panel
   setActivePanel('mission-control');
 }
 
-document.addEventListener('DOMContentLoaded', initApp);
+document.addEventListener('DOMContentLoaded', () => { initApp(); });

@@ -1,3 +1,12 @@
 .DS_Store
 *.log
 node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+server/.venv/
+
+# Local bridge data
+server/data/
