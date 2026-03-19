@@ -598,13 +598,68 @@ function _inferDeadline(text) {
   return m ? m[1] : '';
 }
 
+
+async function fetchPlaybookRecommendations(intake) {
+  if (!window.DRI_LIVE || !window.DRI_LIVE.enabled) return null;
+  try {
+    const res = await fetch(`${window.DRI_LIVE.apiBase}/api/recommendations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: intake.text,
+        p_level: intake.p_level,
+        mode: intake.readiness_mode,
+        deadline: intake.deadline,
+      })
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json && json.ok && json.data) return json.data;
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function renderRecommendationsBlock(rec) {
+  const esc = (s) => escapeHtml(String(s || ''));
+  const els = Array.isArray(rec.elements) ? rec.elements : [];
+  return `
+    <div class="output-card">
+      <h4>Playbook-anchored recommendations (Claude)</h4>
+      ${rec.executive_summary ? `<div class="text-secondary" style="margin-top:8px">${esc(rec.executive_summary)}</div>` : ''}
+      ${(Array.isArray(rec.clarifying_questions) && rec.clarifying_questions.length)
+        ? `<div class="mt-12"><b>Clarifying questions</b><ul>${rec.clarifying_questions.map(q => `<li>${esc(q)}</li>`).join('')}</ul></div>`
+        : ''}
+    </div>
+
+    ${els.map(e => {
+      const actions = Array.isArray(e.recommended_actions) ? e.recommended_actions : [];
+      const avoid = Array.isArray(e.avoid) ? e.avoid : [];
+      const v7 = e.validation && Array.isArray(e.validation.t_plus_7) ? e.validation.t_plus_7 : [];
+      const v30 = e.validation && Array.isArray(e.validation.t_plus_30) ? e.validation.t_plus_30 : [];
+      return `
+        <div class="output-card">
+          <h4>${esc(e.name)}</h4>
+          <div class="output-list">
+            ${e.good_looks_like ? `<div class="li"><b>Good looks like:</b> ${esc(e.good_looks_like)}</div>` : ''}
+            ${actions.length ? `<div class="li"><b>Recommended actions:</b><ul>${actions.map(a => `<li><b>${esc(a.action)}</b>${a.why ? ` — ${esc(a.why)}` : ''}${a.evidence ? `<br/><span class=\"text-secondary\">Evidence: ${esc(a.evidence)}</span>` : ''}${a.timing ? `<br/><span class=\"text-secondary\">Timing: ${esc(a.timing)}</span>` : ''}</li>`).join('')}</ul></div>` : ''}
+            ${avoid.length ? `<div class="li"><b>Avoid:</b><ul>${avoid.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+            ${(v7.length || v30.length) ? `<div class="li"><b>Validation:</b>${v7.length ? `<div class=\"text-secondary\">T+7: ${v7.map(esc).join(' • ')}</div>` : ''}${v30.length ? `<div class=\"text-secondary\">T+30: ${v30.map(esc).join(' • ')}</div>` : ''}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('')}
+  `;
+}
+
 function _inferTitle(text) {
   const first = (text || '').split(/\n|\.|\!/)[0].trim();
   return first.length ? first.slice(0, 100) : 'New change';
 }
 
 function initIntake() {
-  qs('#intake-generate').onclick = () => {
+  qs('#intake-generate').onclick = async () => {
     const text = (qs('#intake-text').value || '').trim();
     if (!text) return alert('Paste a change description first.');
     const out = qs('#intake-output');
@@ -619,7 +674,15 @@ function initIntake() {
       deadline: _inferDeadline(text),
     };
 
+    // Always show demo output immediately
     out.innerHTML = buildIntakeOutput(text);
+
+    // If live mode, also fetch LLM recommendations and append
+    const rec = await fetchPlaybookRecommendations(window.__last_intake);
+    if (rec) {
+      out.innerHTML = out.innerHTML + renderRecommendationsBlock(rec);
+      window.__last_intake.recommendations = rec;
+    }
 
     // Wire bridge create button if present
     const btn = qs('#bridge-create-init');
