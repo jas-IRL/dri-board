@@ -683,13 +683,15 @@ function buildIntakeOutput(text) {
   if (lower.includes('fraud')) affected.push('Fraud');
   if (affected.length === 0) affected.push('TBD');
 
-  const rapid = {
+  const rapidEnabled = !!(window.DRI_PLAYBOOK && window.DRI_PLAYBOOK.features && window.DRI_PLAYBOOK.features.rapid);
+
+  const rapid = rapidEnabled ? {
     recommend: 'Product / Ops',
     agree: p === 'P0' ? 'Legal + Quality' : 'Quality',
     perform: 'Content Ops + L&D + BPO',
     input: 'BPO Ops + VMO + Product',
     decide: 'Strategy Lead, Operational Readiness'
-  };
+  } : null;
 
   const goNoGo = (window.DRI_PLAYBOOK && Array.isArray(window.DRI_PLAYBOOK.readinessElements))
     ? window.DRI_PLAYBOOK.readinessElements.map(e => `${e.name}: ${e.readyWhen || e.whatItCovers || ''}`.trim())
@@ -712,7 +714,22 @@ function buildIntakeOutput(text) {
     abort: ['FCR down >2pp for 3 consecutive days', 'QA down >3pp vs baseline', 'Escalations spike >25% week-over-week']
   };
 
-  const slackMsg = `Hi team. For this change, I’m classifying it as ${p} based on customer impact and readiness risk.\n\nNext steps today: (1) confirm RAPID (Decide/Agree/Perform) in Jira, (2) align deadline and launch guardrails, (3) lock training modality and success criteria.\n\nPlease reply with any blockers by EOD so we can keep the readiness plan on track.`;
+  const slackMsg = rapidEnabled
+    ? `Hi team. For this change, I’m classifying it as ${p} based on customer impact and readiness risk.\n\nNext steps today: (1) confirm RAPID (Decide/Agree/Perform) in Jira, (2) align deadline and launch guardrails, (3) lock training modality and success criteria.\n\nPlease reply with any blockers by EOD so we can keep the readiness plan on track.`
+    : `Hi team. For this change, I’m classifying it as ${p} based on customer impact and readiness risk.\n\nNext steps today: (1) confirm frontline impact + dependencies, (2) align deadline / go-live guardrails, (3) assign owners for each readiness element and confirm what “ready” means.\n\nPlease reply with blockers or missing context by EOD so we can keep the readiness plan on track.`;
+
+  const rapidCard = rapidEnabled ? `
+    <div class="output-card">
+      <h4>RAPID assignment</h4>
+      <div class="output-kv">
+        <div class="k">Recommend</div><div>${escapeHtml(rapid.recommend)}</div>
+        <div class="k">Agree</div><div>${escapeHtml(rapid.agree)}</div>
+        <div class="k">Perform</div><div>${escapeHtml(rapid.perform)}</div>
+        <div class="k">Input</div><div>${escapeHtml(rapid.input)}</div>
+        <div class="k">Decide</div><div>${escapeHtml(rapid.decide)}</div>
+      </div>
+    </div>
+  ` : '';
 
   return `
     <div class="output-card">
@@ -725,16 +742,7 @@ function buildIntakeOutput(text) {
       </div>
     </div>
 
-    <div class="output-card">
-      <h4>RAPID assignment</h4>
-      <div class="output-kv">
-        <div class="k">Recommend</div><div>${escapeHtml(rapid.recommend)}</div>
-        <div class="k">Agree</div><div>${escapeHtml(rapid.agree)}</div>
-        <div class="k">Perform</div><div>${escapeHtml(rapid.perform)}</div>
-        <div class="k">Input</div><div>${escapeHtml(rapid.input)}</div>
-        <div class="k">Decide</div><div>${escapeHtml(rapid.decide)}</div>
-      </div>
-    </div>
+    ${rapidCard}
 
     <div class="output-card">
       <h4>Stakeholder Slack message (ready to send)</h4>

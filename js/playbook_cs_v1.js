@@ -5,6 +5,12 @@ window.DRI_PLAYBOOK = {
   title: 'CS Readiness Playbook',
   version: '2026-03-19',
 
+  // Feature flags: keep the board aligned to *your* playbook.
+  // RAPID is supported by the app/Jira mapping, but is not part of this playbook by default.
+  features: {
+    rapid: false,
+  },
+
   tenets: [
     'We measure readiness by advocate performance, not deliverable completion; we will challenge our own work if outcomes don\'t match preparation. Completion rates and assessments are signals, not proof. If advocates struggle after launch, the preparation changes.',
     'Every change has a unique risk profile; readiness is not one-size-fits-all. We scale rigor to match impact—light touch for routine updates, full process for what matters. P-levels exist so we don\'t over-engineer small things or under-prepare big ones.',
