@@ -1,19 +1,32 @@
 # DRI Board Backend (Bridge Mode)
 ## Claude Opus recommendations (optional)
 
-If your environment approves Claude (Anthropic), you can enable playbook-anchored recommendations locally.
+Claude is only called from the backend (your API key never goes to the browser).
 
-### Set env vars
+### Easiest way (recommended): run script that prompts for the key
+```bash
+cd server
+chmod +x run_local.sh
+./run_local.sh
+```
+
+It will:
+- create/activate `server/.venv`
+- install requirements
+- **prompt you for `ANTHROPIC_API_KEY` at runtime** (not saved on disk)
+
+### Manual way: set env vars
 ```bash
 export ANTHROPIC_API_KEY='YOUR_KEY_HERE'
-export ANTHROPIC_MODEL='claude-3-opus-20240229'  # or your approved Opus model
+export ANTHROPIC_MODEL='claude-3-opus-20240229'
+python src/app.py
 ```
 
 ### Call endpoint
 ```bash
 curl -s http://localhost:5055/api/recommendations \
   -H 'Content-Type: application/json' \
-  -d '{"text":"Describe the change...","p_level":"P1","mode":"Launch Readiness"}' | jq
+  -d '{"text":"Describe the change...","p_level":"P1","mode":"Launch Readiness"}'
 ```
 
 This returns JSON recommendations per your playbook readiness elements.
