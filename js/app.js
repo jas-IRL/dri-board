@@ -138,11 +138,23 @@ function unsnoozeAll() {
   if (typeof renderAll === 'function') renderAll();
 }
 
+function setBuildStamp() {
+  const el = document.getElementById('build-stamp');
+  if (!el) return;
+
+  // Visible “proof” the newest build is loading
+  const build = 'build: 2026-03-19 18:06';
+  const mode = (window.DRI_CONFIG && window.DRI_CONFIG.API_BASE) ? 'LIVE' : 'DEMO';
+  el.textContent = `${build} • ${mode}`;
+}
+
 async function initApp() {
   initNavigation();
   initTabs();
   initModalCloseHandlers();
   initGlobalSearch();
+
+  setBuildStamp();
 
   // If a backend is configured, load live bridge data first
   if (typeof bootstrapLiveData === 'function') {
