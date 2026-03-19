@@ -47,6 +47,7 @@ Subtasks represent readiness elements.
   - Communications (Content)
   - Operational Readiness
   - Compliance / Regulatory
+  - Data / Measurement
 - `Functional DRI` → `readiness_elements.functional_dri`
 - `What needs to happen` → `readiness_elements.what_needs_to_happen`
 - `Dependencies` → `readiness_elements.dependencies`

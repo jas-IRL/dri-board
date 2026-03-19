@@ -110,6 +110,7 @@ READINESS_ELEMENTS = [
     "Communications (Content)",
     "Operational Readiness",
     "Compliance / Regulatory",
+    "Data / Measurement",
 ]
 
 

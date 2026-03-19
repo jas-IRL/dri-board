@@ -691,18 +691,20 @@ function buildIntakeOutput(text) {
     decide: 'Strategy Lead, Operational Readiness'
   };
 
-  const goNoGo = [
-    'Jira epic created with P-level label and deadline',
-    'RAPID assigned and acknowledged (Decide, Agree, Perform)',
-    'Training brief approved and scheduled for all sites',
-    'Comms draft reviewed by Agree role(s)',
-    'Advocate comprehension check defined (pass threshold)',
-    'KB/macros updated and published',
-    'Measurement plan includes 7-day leading + 30-day lagging metrics',
-    'Abort triggers defined and escalation path confirmed',
-    'BPO delivery plan confirmed (sites, dates, coverage)',
-    'Go/No-Go meeting held and decision logged'
-  ];
+  const goNoGo = (window.DRI_PLAYBOOK && Array.isArray(window.DRI_PLAYBOOK.readinessElements))
+    ? window.DRI_PLAYBOOK.readinessElements.map(e => `${e.name}: ${e.readyWhen || e.whatItCovers || ''}`.trim())
+    : [
+      'Jira epic created with P-level label and deadline',
+      'RAPID assigned and acknowledged (Decide, Agree, Perform)',
+      'Training brief approved and scheduled for all sites',
+      'Comms draft reviewed by Agree role(s)',
+      'Advocate comprehension check defined (pass threshold)',
+      'KB/macros updated and published',
+      'Measurement plan includes 7-day leading + 30-day lagging metrics',
+      'Abort triggers defined and escalation path confirmed',
+      'BPO delivery plan confirmed (sites, dates, coverage)',
+      'Go/No-Go meeting held and decision logged'
+    ];
 
   const measurement = {
     leading7: ['Training completion %', 'Comprehension pass rate', 'Top driver tags', 'Escalations volume'],
