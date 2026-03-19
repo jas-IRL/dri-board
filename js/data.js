@@ -19,7 +19,7 @@ function persistSnoozes() {
   localStorage.setItem('snoozed_worldview', JSON.stringify([...store.snoozed.worldview]));
 }
 
-const initiatives = [
+let initiatives = [
   {
     id: 'OR-2412',
     name: 'Disputes: Evidence Upload UX Change',

@@ -449,18 +449,37 @@ function aggregateSentiment(name, label, arr) {
   };
 }
 
-function renderWorldview() {
+async function renderWorldview() {
   const activeType = qs('#worldview .filter-btn.active')?.getAttribute('data-wv') || 'all';
-  let items = worldviewItems.filter(w => !store.snoozed.worldview.has(w.id));
+
+  let items = worldviewItems;
+
+  // If API_BASE is set, pull real external items from backend RSS aggregator
+  const apiBase = (window.DRI_CONFIG && window.DRI_CONFIG.API_BASE) ? window.DRI_CONFIG.API_BASE : '';
+  if (apiBase) {
+    try {
+      const res = await fetch(`${apiBase}/api/worldview`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json && Array.isArray(json.items) && json.items.length) {
+          items = json.items;
+        }
+      }
+    } catch (e) {
+      // fall back to local demo data
+    }
+  }
+
+  items = items.filter(w => !store.snoozed.worldview.has(w.id));
   if (activeType !== 'all') {
-    items = items.filter(w => w.type.toLowerCase() === activeType);
+    items = items.filter(w => (w.type || '').toLowerCase() === activeType);
   }
 
   const grid = qs('#worldview-grid');
   grid.innerHTML = items.map(w => `
     <div class="wv-card">
       <div class="flex justify-between items-center gap-12">
-        <span class="type-badge ${w.type.toLowerCase()}">${escapeHtml(w.type)}</span>
+        <span class="type-badge ${(w.type || '').toLowerCase()}">${escapeHtml(w.type || '')}</span>
         <button class="btn btn-secondary btn-sm" data-snooze-wv="${escapeHtml(w.id)}"><i class="fas fa-clock"></i> Not Relevant</button>
       </div>
       <div class="wv-title">${escapeHtml(w.title)}</div>

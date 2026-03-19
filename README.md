@@ -30,5 +30,39 @@ python3 -m http.server 8000
 - `js/app.js` - navigation, snoozing, global search
 - `js/panels.js` - renderers for each panel
 
-## Next step
-If you share a GitHub repo URL (or confirm you want me to create one with `gh`), I will push this project to GitHub.
+## Bridge mode (no Jira yet)
+If Jira is not ready, you can still make parts of the board "real" now using the optional backend.
+
+What becomes real immediately:
+- **Worldview** panel pulls live external items via RSS aggregation
+- Optional stub endpoints for **Intake**, **Decision Log**, and **Brag Board** so you can persist entries outside the browser
+
+### Run backend
+```bash
+cd server
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python src/app.py
+# backend at http://localhost:5055
+```
+
+### Run frontend (locally, so http->http works)
+Because GitHub Pages is https, it cannot call an http backend (mixed-content blocked).
+Run the UI locally:
+```bash
+cd dri-board
+python3 -m http.server 8000
+# open http://localhost:8000
+```
+
+### Point the UI at the backend
+In your browser console:
+```js
+localStorage.setItem('DRI_API_BASE', 'http://localhost:5055')
+location.reload()
+```
+
+## Jira integration (later)
+When your Jira project is ready, replace stub state with Jira-backed endpoints:
+- initiatives, lifecycle, checklists, artifacts, RAPID, write-back
