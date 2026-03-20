@@ -143,7 +143,7 @@ function setBuildStamp() {
   if (!el) return;
 
   // Visible “proof” the newest build is loading
-  const build = 'build: 2026-03-19 18:16';
+  const build = 'build: 2026-03-19 19:11';
   const mode = (window.DRI_CONFIG && window.DRI_CONFIG.API_BASE) ? 'LIVE' : 'DEMO';
   const pb = (window.DRI_PLAYBOOK && window.DRI_PLAYBOOK.version) ? `PB:${window.DRI_PLAYBOOK.version}` : 'PB:none';
   el.textContent = `${build} • ${mode} • ${pb}`;

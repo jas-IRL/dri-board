@@ -2,6 +2,10 @@
 set -euo pipefail
 
 # DRI Board Bridge Mode launcher (no secrets stored on disk)
+
+# NOTE: This script runs until you stop it (Ctrl+C).
+# If you're using an API key you pasted into chat previously, rotate it after testing.
+
 # - Ensures venv exists
 # - Installs requirements
 # - Prompts for Anthropic key at runtime

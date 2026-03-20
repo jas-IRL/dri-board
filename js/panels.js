@@ -677,7 +677,21 @@ function initIntake() {
     // Always show demo output immediately
     out.innerHTML = buildIntakeOutput(text);
 
-    // If live mode, also fetch LLM recommendations and append
+    // If NOT live mode, show an explicit note so the demo doesn't feel "broken"
+    if (!window.DRI_LIVE || !window.DRI_LIVE.enabled) {
+      out.innerHTML += `
+        <div class="output-card" style="border:1px solid rgba(255,255,255,0.12)">
+          <h4>Claude recommendations (disabled in GitHub Pages demo)</h4>
+          <div class="text-secondary" style="margin-top:8px; line-height:1.4">
+            This public demo runs as static GitHub Pages, so it cannot call Anthropic directly (API keys can’t live in the browser).
+            To enable playbook-anchored recommendations, run the local backend (<code>server/run_local.sh</code>) and open this site via <code>http://localhost:8000</code>.
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    // Live mode: fetch LLM recommendations and append
     const rec = await fetchPlaybookRecommendations(window.__last_intake);
     if (rec) {
       out.innerHTML = out.innerHTML + renderRecommendationsBlock(rec);
