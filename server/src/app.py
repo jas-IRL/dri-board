@@ -2,6 +2,7 @@ import os
 import time
 import uuid
 from datetime import datetime
+import json
 
 import feedparser
 from cachetools import TTLCache
@@ -79,7 +80,200 @@ def _normalize_worldview_entry(entry, source):
 
 @app.get("/api/health")
 def health():
-    return jsonify({"ok": True, "ts": _iso_now()})
+    return jsonify({"ok": True, "ts": _iso_now(), "playbook": PLAYBOOK_VERSION})
+
+
+# -----------------------------
+# Collaborator Sentiment (local import)
+# -----------------------------
+
+
+def _sent_state(composite: float) -> str:
+    try:
+        c = float(composite)
+    except Exception:
+        c = 0.0
+    if c >= 4.5:
+        return "Strong"
+    if c >= 3.5:
+        return "Stable"
+    if c >= 2.5:
+        return "Cooling"
+    if c >= 1.5:
+        return "Drifting"
+    return "Strained"
+
+
+def _slug_id(name: str) -> str:
+    s = (name or "").strip().lower()
+    out = []
+    for ch in s:
+        if ch.isalnum():
+            out.append(ch)
+        elif ch in (" ", "-", "_", "/"):
+            out.append("-")
+    sid = "".join(out).strip("-")
+    while "--" in sid:
+        sid = sid.replace("--", "-")
+    return sid[:64] or f"collab-{uuid.uuid4().hex[:8]}"
+
+
+@app.post("/api/sentiment/import")
+def import_sentiment_report():
+    """Import a daily sentiment report.
+
+    Expected payload matches the JSON your website tool produces.
+    This endpoint is intentionally local-first and unauthenticated.
+    """
+    payload = request.get_json(force=True, silent=True) or {}
+
+    report_date = (payload.get("report_date") or payload.get("date") or "").strip()
+    if not report_date:
+        return jsonify({"error": "report_date is required"}), 400
+
+    now = _iso_now()
+    current_week_window = payload.get("current_week_window")
+    rolling_90d_window = payload.get("rolling_90d_window")
+
+    collaborators = payload.get("collaborators") or []
+    if not isinstance(collaborators, list):
+        return jsonify({"error": "collaborators must be a list"}), 400
+
+    # Upsert report and checkins
+    with db_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO sentiment_reports (report_date, current_week_window, rolling_90d_window, payload_json, created_at)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(report_date) DO UPDATE SET
+              current_week_window=excluded.current_week_window,
+              rolling_90d_window=excluded.rolling_90d_window,
+              payload_json=excluded.payload_json
+            """,
+            (report_date, current_week_window, rolling_90d_window, json.dumps(payload), now),
+        )
+
+        imported = 0
+        for c in collaborators:
+            name = (c.get("name") or "").strip()
+            if not name:
+                continue
+            team = (c.get("team") or "").strip()
+            cid = _slug_id(name)
+
+            # Upsert collaborator
+            conn.execute(
+                """
+                INSERT INTO collaborators (id, name, team, created_at)
+                VALUES (?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET name=excluded.name, team=excluded.team
+                """,
+                (cid, name, team, now),
+            )
+
+            cw = c.get("current_week") or {}
+            r90 = c.get("rolling_90d") or {}
+
+            def _num(x):
+                try:
+                    return float(x)
+                except Exception:
+                    return None
+
+            responsiveness = _num(cw.get("responsiveness"))
+            engagement_depth = _num(cw.get("engagementDepth"))
+            proactivity = _num(cw.get("proactivity"))
+            reliability = _num(cw.get("reliability"))
+            tone_alignment = _num(cw.get("toneAlignment"))
+            composite = _num(cw.get("composite"))
+            state = (cw.get("state") or "").strip() or (_sent_state(composite) if composite is not None else "Stable")
+
+            # Replace check-in for this collaborator+report_date
+            conn.execute(
+                "DELETE FROM sentiment_checkins WHERE collaborator_id=? AND report_date=?",
+                (cid, report_date),
+            )
+            conn.execute(
+                """
+                INSERT INTO sentiment_checkins (
+                  collaborator_id, report_date, window_start, window_end,
+                  responsiveness, engagement_depth, proactivity, reliability, tone_alignment,
+                  composite, state, notes, context, rolling_90d_json, created_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    cid,
+                    report_date,
+                    (payload.get("current_week_window") or "").split(" to ")[0] if payload.get("current_week_window") else None,
+                    (payload.get("current_week_window") or "").split(" to ")[-1] if payload.get("current_week_window") else None,
+                    responsiveness,
+                    engagement_depth,
+                    proactivity,
+                    reliability,
+                    tone_alignment,
+                    composite,
+                    state,
+                    cw.get("notes"),
+                    cw.get("context"),
+                    json.dumps(r90) if r90 else None,
+                    now,
+                ),
+            )
+            imported += 1
+
+    return jsonify({"ok": True, "report_date": report_date, "imported": imported})
+
+
+@app.get("/api/sentiment/latest")
+def get_latest_sentiment_report():
+    with db_conn() as conn:
+        rep = conn.execute(
+            "SELECT * FROM sentiment_reports ORDER BY report_date DESC LIMIT 1"
+        ).fetchone()
+        if not rep:
+            return jsonify({"report": None, "items": []})
+        report = dict(rep)
+
+        rows = conn.execute(
+            """
+            SELECT sc.*, c.name, c.team
+            FROM sentiment_checkins sc
+            JOIN collaborators c ON c.id = sc.collaborator_id
+            WHERE sc.report_date = ?
+            ORDER BY sc.composite DESC NULLS LAST, c.name ASC
+            """,
+            (report["report_date"],),
+        ).fetchall()
+
+        items = []
+        for r in rows:
+            d = dict(r)
+            items.append(
+                {
+                    "name": d.get("name"),
+                    "team": d.get("team"),
+                    "current_week": {
+                        "responsiveness": d.get("responsiveness"),
+                        "engagementDepth": d.get("engagement_depth"),
+                        "proactivity": d.get("proactivity"),
+                        "reliability": d.get("reliability"),
+                        "toneAlignment": d.get("tone_alignment"),
+                        "composite": d.get("composite"),
+                        "state": d.get("state"),
+                        "notes": d.get("notes"),
+                        "context": d.get("context"),
+                    },
+                    "rolling_90d": json.loads(d["rolling_90d_json"]) if d.get("rolling_90d_json") else None,
+                }
+            )
+
+        out = {
+            "report_date": report.get("report_date"),
+            "current_week_window": report.get("current_week_window"),
+            "rolling_90d_window": report.get("rolling_90d_window"),
+            "collaborators": items,
+        }
+        return jsonify({"report": out})
 
 
 def _wv_tokenize(s: str):

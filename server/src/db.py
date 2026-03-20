@@ -66,6 +66,68 @@ def migrate():
             """
         )
 
+        # Collaborator sentiment (manual/imported). This is local-first and does not
+        # depend on Slack integration.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sentiment_reports (
+              report_date TEXT PRIMARY KEY,
+              current_week_window TEXT,
+              rolling_90d_window TEXT,
+              payload_json TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS collaborators (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              team TEXT,
+              created_at TEXT NOT NULL
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sentiment_checkins (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              collaborator_id TEXT NOT NULL,
+              report_date TEXT NOT NULL,
+              window_start TEXT,
+              window_end TEXT,
+              responsiveness REAL,
+              engagement_depth REAL,
+              proactivity REAL,
+              reliability REAL,
+              tone_alignment REAL,
+              composite REAL,
+              state TEXT,
+              notes TEXT,
+              context TEXT,
+              rolling_90d_json TEXT,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY (collaborator_id) REFERENCES collaborators(id) ON DELETE CASCADE,
+              FOREIGN KEY (report_date) REFERENCES sentiment_reports(report_date) ON DELETE CASCADE
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_checkins_report_date ON sentiment_checkins(report_date)
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_checkins_collaborator ON sentiment_checkins(collaborator_id)
+            """
+        )
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS readiness_elements (

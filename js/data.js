@@ -371,6 +371,10 @@ async function loadLiveDecisions() {
     title: d.title,
     decidedAt: (d.decided_at || d.created_at || '').slice(0, 10),
     details: d.details || '',
+    initiative_id: d.initiative_id || null,
+    tenet_alignment: d.tenet_alignment || null,
+    expected_outcome: d.expected_outcome || null,
+    actual_outcome: d.actual_outcome || null,
   }));
 }
 

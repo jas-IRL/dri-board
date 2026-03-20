@@ -160,6 +160,9 @@ function renderMissionControl() {
 
 function renderWorkstreams() {
   const list = qs('#workstream-list');
+
+  // Respect playbook feature flag: RAPID is off by default in your playbook.
+  const rapidEnabled = !!(window.DRI_PLAYBOOK && window.DRI_PLAYBOOK.features && window.DRI_PLAYBOOK.features.rapid);
   const filter = qs('#workstreams .filter-btn.active')?.getAttribute('data-filter') || 'active-measuring';
   const sort = qs('#ws-sort')?.value || 'priority';
 
@@ -209,14 +212,17 @@ function renderWorkstreams() {
               </div>
             </div>
             <div class="ws-section">
-              <h4>RAPID</h4>
-              <div class="ws-kv">
-                <div class="k">Recommend</div><div>${escapeHtml(init.rapid.recommend)}</div>
-                <div class="k">Agree</div><div>${escapeHtml(init.rapid.agree)}</div>
-                <div class="k">Perform</div><div>${escapeHtml(init.rapid.perform)}</div>
-                <div class="k">Input</div><div>${escapeHtml(init.rapid.input)}</div>
-                <div class="k">Decide</div><div>${escapeHtml(init.rapid.decide)}</div>
-              </div>
+              ${rapidEnabled ? `
+                <h4>RAPID</h4>
+                <div class="ws-kv">
+                  <div class="k">Recommend</div><div>${escapeHtml(init.rapid.recommend)}</div>
+                  <div class="k">Agree</div><div>${escapeHtml(init.rapid.agree)}</div>
+                  <div class="k">Perform</div><div>${escapeHtml(init.rapid.perform)}</div>
+                  <div class="k">Input</div><div>${escapeHtml(init.rapid.input)}</div>
+                  <div class="k">Decide</div><div>${escapeHtml(init.rapid.decide)}</div>
+                </div>
+              ` : ''}
+
               <div class="mt-12">
                 <h4>Checklist</h4>
                 <ul class="ws-checklist">
@@ -297,6 +303,14 @@ function deriveRisks(init) {
 }
 
 function renderCommsQueue() {
+  // Slack integration is not ready yet. Keep this panel explicitly blank in LIVE mode.
+  if (window.DRI_LIVE && window.DRI_LIVE.enabled) {
+    qs('#unreplied-list').innerHTML = `<div class="empty-state">Slack integration not connected yet. This panel will populate once Slack is enabled.</div>`;
+    qs('#open-threads-list').innerHTML = '';
+    qs('#proactive-list').innerHTML = '';
+    return;
+  }
+
   function threadRow(item, kind) {
     const init = initiatives.find(i => i.id === item.initiativeId);
     const p = init?.pLevel || 'P2';
@@ -1469,38 +1483,169 @@ function renderDecisionLog() {
     };
   });
 
-  qs('#decision-add').onclick = async () => {
-    const title = prompt('Decision title (what was decided)?');
-    if (!title) return;
-    const details = prompt('Details (rationale, alternatives, tenet alignment, expected outcome):') || '';
-    const decision_type = prompt('Type (p-level, go-nogo, resource, escalation, all):', 'all') || 'all';
+  // Modal-based decision entry (no browser popups)
+  qs('#decision-add').onclick = () => {
+    const m = qs('#add-decision-modal');
+    if (!m) return;
+
+    // Populate initiatives dropdown
+    const sel = qs('#decision-initiative');
+    if (sel) {
+      const current = sel.value;
+      const opts = ['<option value="">— None —</option>']
+        .concat((initiatives || []).map(i => `<option value="${escapeHtml(i.backendId || i.id)}">${escapeHtml(i.id)} · ${escapeHtml(i.name)}</option>`));
+      sel.innerHTML = opts.join('');
+      sel.value = current || '';
+    }
+
+    // Default date = today
+    const d = qs('#decision-date');
+    if (d && !d.value) d.value = new Date().toISOString().slice(0, 10);
+
+    m.style.display = 'flex';
+  };
+
+  qs('#decision-save').onclick = async () => {
+    const title = (qs('#decision-title')?.value || '').trim();
+    const details = (qs('#decision-details')?.value || '').trim();
+    const decision_type = (qs('#decision-type')?.value || 'all').trim();
+    const initiative_id = (qs('#decision-initiative')?.value || '').trim() || null;
+    const decided_at = (qs('#decision-date')?.value || '').trim() || null;
+    const tenet_alignment = (qs('#decision-tenet')?.value || '').trim() || null;
+    const expected_outcome = (qs('#decision-expected')?.value || '').trim() || null;
+
+    if (!title) return alert('Decision title is required.');
 
     if (window.DRI_LIVE && window.DRI_LIVE.enabled) {
       try {
         await fetch(`${window.DRI_LIVE.apiBase}/api/decisions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, details, decision_type })
+          body: JSON.stringify({
+            title,
+            details,
+            decision_type,
+            initiative_id,
+            decided_at,
+            tenet_alignment,
+            expected_outcome,
+          })
         });
         await loadLiveDecisions();
       } catch (e) {
         alert('Failed to save decision to local backend.');
       }
     } else {
-      decisions.unshift({ id: `d${Date.now()}`, type: decision_type, title, decidedAt: new Date().toISOString().slice(0,10), details });
+      decisions.unshift({
+        id: `d${Date.now()}`,
+        type: decision_type,
+        title,
+        decidedAt: (decided_at || new Date().toISOString().slice(0,10)),
+        details: details || ''
+      });
     }
+
+    // Close + reset
+    const m = qs('#add-decision-modal');
+    if (m) m.style.display = 'none';
+    if (qs('#decision-title')) qs('#decision-title').value = '';
+    if (qs('#decision-details')) qs('#decision-details').value = '';
+    if (qs('#decision-tenet')) qs('#decision-tenet').value = '';
+    if (qs('#decision-expected')) qs('#decision-expected').value = '';
 
     renderAll('decision-log');
   };
 
-  // Patterns (demo)
-  qs('#patterns-content').innerHTML = `
-    <div class="text-secondary" style="line-height:1.45">
-      Demo placeholder. In production, this analyzes decision outcomes over time (predicted vs actual) and surfaces recurring gaps.
-      Example pattern: “Go/No-Go checklists are created late for P1 items; shift artifact creation earlier.”
-    </div>
-    <div class="mt-12"><button class="btn btn-secondary btn-sm" onclick="unsnoozeAll()"><i class=\"fas fa-rotate\"></i> Reset snoozed items</button></div>
-  `;
+  // Patterns (deterministic)
+  // No semantic/LLM classification: timing/coverage/volume + hygiene.
+  const pat = qs('#patterns-content');
+  if (pat) {
+    const iso = (s) => (s || '').slice(0,10);
+
+    const initsWithLaunch = initiatives.filter(i => !!(i.deadline));
+    const decisionsByInit = new Map();
+    for (const d of (decisions || [])) {
+      const k = d.initiative_id || null;
+      if (!k) continue;
+      const arr = decisionsByInit.get(k) || [];
+      arr.push(d);
+      decisionsByInit.set(k, arr);
+    }
+
+    // Governance coverage: initiatives with deadlines but no decisions logged
+    const missingCoverage = initsWithLaunch.filter(i => !decisionsByInit.get(i.backendId || i.id));
+
+    // Timing risk: decisions inside T-7 and T-3 of launch/deadline
+    let inside7 = 0, inside3 = 0, withLaunchAndDecision = 0;
+    for (const i of initsWithLaunch) {
+      const ds = decisionsByInit.get(i.backendId || i.id) || [];
+      if (!ds.length) continue;
+      withLaunchAndDecision += 1;
+      const launch = new Date(i.deadline + 'T00:00:00');
+      for (const d of ds) {
+        const dd = new Date((d.decidedAt || iso(d.decided_at) || '').slice(0,10) + 'T00:00:00');
+        const deltaDays = Math.round((launch - dd) / (1000*60*60*24));
+        if (Number.isFinite(deltaDays) && deltaDays <= 7) inside7 += 1;
+        if (Number.isFinite(deltaDays) && deltaDays <= 3) inside3 += 1;
+      }
+    }
+
+    // Decision volume: count by week (YYYY-WW)
+    const weekKey = (dateStr) => {
+      const d = new Date((dateStr || '').slice(0,10) + 'T00:00:00');
+      if (isNaN(d.getTime())) return null;
+      // ISO week approx (good enough for deterministic volume signal)
+      const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+      const dayNum = t.getUTCDay() || 7;
+      t.setUTCDate(t.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(t.getUTCFullYear(),0,1));
+      const weekNo = Math.ceil((((t - yearStart) / 86400000) + 1) / 7);
+      return `${t.getUTCFullYear()}-W${String(weekNo).padStart(2,'0')}`;
+    };
+
+    const vol = new Map();
+    for (const d of (decisions || [])) {
+      const wk = weekKey(d.decidedAt || iso(d.decided_at) || d.created_at);
+      if (!wk) continue;
+      vol.set(wk, (vol.get(wk) || 0) + 1);
+    }
+    const volRows = [...vol.entries()].sort((a,b) => a[0] < b[0] ? 1 : -1).slice(0, 8);
+
+    // Hygiene: missing initiative links
+    const missingInitLink = (decisions || []).filter(d => !d.initiative_id).length;
+    const totalDec = (decisions || []).length || 1;
+
+    // Churn: initiatives with unusually high decision count
+    const churn = [...decisionsByInit.entries()]
+      .map(([k, arr]) => ({ id: k, count: arr.length }))
+      .sort((a,b) => b.count - a.count)
+      .slice(0, 5)
+      .filter(x => x.count >= 3);
+
+    pat.innerHTML = `
+      <div class="output-kv">
+        <div class="k">Governance coverage gaps</div><div>${missingCoverage.length} initiative(s) with a deadline but no decisions logged</div>
+        <div class="k">Timing risk</div><div>${withLaunchAndDecision ? `${inside7} decision(s) inside T-7; ${inside3} inside T-3` : 'No launch-linked decisions yet'}</div>
+        <div class="k">Hygiene</div><div>${missingInitLink} / ${totalDec} decisions missing an initiative link</div>
+      </div>
+
+      <div class="mt-12">
+        <div style="font-weight:800; margin-bottom:6px">Decision volume (recent weeks)</div>
+        <div class="text-secondary" style="font-size:0.9rem; line-height:1.35">
+          ${volRows.length ? volRows.map(([wk, n]) => `${escapeHtml(wk)}: <b>${n}</b>`).join(' · ') : 'No decision volume data yet.'}
+        </div>
+      </div>
+
+      <div class="mt-12">
+        <div style="font-weight:800; margin-bottom:6px">Churn signals (decision-heavy initiatives)</div>
+        <div class="text-secondary" style="font-size:0.9rem; line-height:1.35">
+          ${churn.length ? churn.map(x => `${escapeHtml(String(x.id))}: <b>${x.count}</b>`).join(' · ') : 'No churn signals yet.'}
+        </div>
+      </div>
+
+      <div class="mt-12"><button class="btn btn-secondary btn-sm" onclick="unsnoozeAll()"><i class=\"fas fa-rotate\"></i> Reset snoozed items</button></div>
+    `;
+  }
 }
 
 function renderAll(panelId) {
@@ -1525,8 +1670,36 @@ function renderAll(panelId) {
     window.__init_done = true;
   }
 
-  // Update nav badges (demo)
+  // Update nav badges
   qs('#nav-badge-ws').textContent = `${initiatives.filter(i => i.lifecycle === 'Active').length}`;
-  qs('#nav-badge-cq').textContent = `${comms.unreplied.filter(m => !store.snoozed.comms.has(m.id)).length}`;
-  qs('#nav-badge-ai').textContent = `${recommendations.filter(r => !store.snoozed.recs.has(r.id)).length}`;
+
+  // Comms Queue is blocked until Slack integration; show 0 in LIVE to avoid misleading counts.
+  if (window.DRI_LIVE && window.DRI_LIVE.enabled) {
+    qs('#nav-badge-cq').textContent = '0';
+  } else {
+    qs('#nav-badge-cq').textContent = `${comms.unreplied.filter(m => !store.snoozed.comms.has(m.id)).length}`;
+  }
+
+  // AI Recommender is derived; in LIVE we should use derivedRecommendations() rather than demo list.
+  try {
+    const allRecs = (typeof deriveRecommendations === 'function') ? deriveRecommendations() : recommendations;
+    qs('#nav-badge-ai').textContent = `${(allRecs || []).filter(r => !store.snoozed.recs.has(r.id)).length}`;
+  } catch (e) {
+    qs('#nav-badge-ai').textContent = `${recommendations.filter(r => !store.snoozed.recs.has(r.id)).length}`;
+  }
+
+  // Collaborator Sentiment badge: show number of people in Cooling/Drifting/Strained.
+  try {
+    const risk = (collaborators || []).filter(c => ['Cooling','Drifting','Strained'].includes(c.state)).length;
+    const el = qs('#nav-badge-cs');
+    if (el) el.textContent = String(risk);
+  } catch (e) { /* ignore */ }
+
+  // Mission Control badge: number of high-urgency derived recommendations (top-of-list)
+  try {
+    const allRecs = (typeof deriveRecommendations === 'function') ? deriveRecommendations() : recommendations;
+    const urgent = (allRecs || []).filter(r => !store.snoozed.recs.has(r.id)).slice(0, 3).length;
+    const el = qs('#nav-badge-mc');
+    if (el) el.textContent = String(urgent);
+  } catch (e) { /* ignore */ }
 }
