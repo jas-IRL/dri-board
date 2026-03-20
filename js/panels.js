@@ -353,7 +353,181 @@ function renderCommsQueue() {
   });
 }
 
+function _sentimentState(composite) {
+  const c = Number(composite) || 0;
+  return c >= 4.5 ? 'Strong'
+    : c >= 3.5 ? 'Stable'
+    : c >= 2.5 ? 'Cooling'
+    : c >= 1.5 ? 'Drifting'
+    : 'Strained';
+}
+
+function _stateDistribution(items) {
+  const dist = { Strong: 0, Stable: 0, Cooling: 0, Drifting: 0, Strained: 0 };
+  for (const it of items) {
+    const s = it.state || _sentimentState(it.composite);
+    if (dist[s] != null) dist[s] += 1;
+  }
+  return dist;
+}
+
+function _avgComposite(items) {
+  if (!items.length) return 0;
+  const sum = items.reduce((s, x) => s + (Number(x.composite) || 0), 0);
+  return +(sum / items.length).toFixed(1);
+}
+
+function _normalizeImportedSentiment(report) {
+  const collabs = Array.isArray(report?.collaborators) ? report.collaborators : [];
+  return collabs.map((c, idx) => {
+    const cw = c.current_week || {};
+    const dims = {
+      responsiveness: Number(cw.responsiveness) || 0,
+      engagement: Number(cw.engagementDepth) || 0,
+      proactivity: Number(cw.proactivity) || 0,
+      reliability: Number(cw.reliability) || 0,
+      tone: Number(cw.toneAlignment) || 0,
+    };
+    const composite = Number(cw.composite) || +(Object.values(dims).reduce((s, n) => s + n, 0) / 5).toFixed(1);
+    const state = cw.state || _sentimentState(composite);
+
+    // Mirror the existing shape expected by the current UI renderer
+    return {
+      id: `imp-${(report.report_date || 'date')}-${idx}`,
+      tier: {
+        org: (c.team || '').includes('(') ? (c.team.split('(')[0] || '').trim() : (c.team || 'Unknown'),
+        role: c.team || 'Unknown',
+        individual: c.name || 'Unknown'
+      },
+      state,
+      composite,
+      dims,
+      recommendation: null,
+      notes: cw.notes || '',
+      context: cw.context || ''
+    };
+  });
+}
+
+function _extractFirstJsonObject(text) {
+  const s = (text || '').trim();
+  const start = s.indexOf('{');
+  if (start < 0) return null;
+
+  // Walk braces to find the end of the first JSON object
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === '{') depth++;
+    if (ch === '}') depth--;
+    if (depth === 0) {
+      return s.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+function _renderSentimentSummaryFromItems(items, meta) {
+  const el = qs('#sentiment-summary');
+  if (!el) return;
+
+  const dist = _stateDistribution(items);
+  const avg = _avgComposite(items);
+  const sub = meta ? `${escapeHtml(meta)}` : '';
+
+  el.innerHTML = `
+    ${sub ? `<div class="text-muted" style="margin:-4px 0 10px 0; font-size:0.8rem">${sub}</div>` : ''}
+    <div class="sentiment-summary">
+      <div class="sentiment-kpi"><div class="num">${avg.toFixed ? avg.toFixed(1) : avg}</div><div class="lbl">Avg Composite</div></div>
+      <div class="sentiment-kpi"><div class="num" style="color:var(--status-strong)">${dist.Strong}</div><div class="lbl">Strong</div></div>
+      <div class="sentiment-kpi"><div class="num" style="color:var(--status-stable)">${dist.Stable}</div><div class="lbl">Stable</div></div>
+      <div class="sentiment-kpi"><div class="num" style="color:var(--status-cooling)">${dist.Cooling}</div><div class="lbl">Cooling</div></div>
+      <div class="sentiment-kpi"><div class="num" style="color:var(--status-drifting)">${dist.Drifting}</div><div class="lbl">Drifting</div></div>
+      <div class="sentiment-kpi"><div class="num" style="color:var(--status-strained)">${dist.Strained}</div><div class="lbl">Strained</div></div>
+    </div>
+  `;
+}
+
+function _wireSentimentImport() {
+  const ta = qs('#sentiment-import');
+  const apply = qs('#sentiment-import-apply');
+  const clear = qs('#sentiment-import-clear');
+  if (!ta || !apply || !clear) return;
+
+  const KEY = 'DRI_SENTIMENT_REPORT_RAW';
+
+  // Restore
+  const saved = localStorage.getItem(KEY);
+  if (saved && !ta.value) ta.value = saved;
+
+  clear.onclick = () => {
+    ta.value = '';
+    localStorage.removeItem(KEY);
+  };
+
+  apply.onclick = () => {
+    const raw = (ta.value || '').trim();
+    if (!raw) return alert('Paste a report first.');
+    localStorage.setItem(KEY, raw);
+
+    const jsonStr = _extractFirstJsonObject(raw);
+    if (!jsonStr) return alert('Could not find JSON in the pasted text.');
+
+    try {
+      const report = JSON.parse(jsonStr);
+      const imported = _normalizeImportedSentiment(report);
+      if (!imported.length) return alert('No collaborators found in JSON payload.');
+
+      // Swap global collaborator dataset for rendering
+      collaborators = imported;
+
+      const meta = `Report: ${(report.report_date || '').toString()} · Current week: ${escapeHtml(report.current_week_window || '')} · Rolling 90d: ${escapeHtml(report.rolling_90d_window || '')}`;
+      _renderSentimentSummaryFromItems(imported.map(c => ({ state: c.state, composite: c.composite })), meta);
+      renderAll('collaborator-sentiment');
+    } catch (e) {
+      alert('Invalid JSON. Double-check the pasted report.');
+    }
+  };
+}
+
 function renderCollaboratorSentiment() {
+  // Ensure import wiring exists (safe to call multiple times)
+  if (!window.__sentiment_import_wired) {
+    _wireSentimentImport();
+    window.__sentiment_import_wired = true;
+
+    // If the user already has a saved report, auto-apply it once
+    try {
+      const raw = localStorage.getItem('DRI_SENTIMENT_REPORT_RAW') || '';
+      if (raw) {
+        const jsonStr = _extractFirstJsonObject(raw);
+        if (jsonStr) {
+          const report = JSON.parse(jsonStr);
+          const imported = _normalizeImportedSentiment(report);
+          if (imported.length) {
+            collaborators = imported;
+            const meta = `Report: ${(report.report_date || '').toString()} · Current week: ${escapeHtml(report.current_week_window || '')} · Rolling 90d: ${escapeHtml(report.rolling_90d_window || '')}`;
+            _renderSentimentSummaryFromItems(imported.map(c => ({ state: c.state, composite: c.composite })), meta);
+          }
+        }
+      }
+    } catch (e) { /* ignore */ }
+
+    // If no import exists, render a summary for the demo dataset
+    if (qs('#sentiment-summary') && (!localStorage.getItem('DRI_SENTIMENT_REPORT_RAW'))) {
+      _renderSentimentSummaryFromItems(collaborators.map(c => ({ state: c.state, composite: c.composite })), 'Demo data (paste your report above to replace)');
+    }
+  }
+
   const tier = qs('#collaborator-sentiment .filter-btn.active')?.getAttribute('data-tier') || 'role';
   const query = (qs('#collab-search')?.value || '').toLowerCase().trim();
 
@@ -445,13 +619,9 @@ function renderCollaboratorSentiment() {
           <div class="k">Reliability</div><div>${item.dims.reliability.toFixed(1)}</div>
           <div class="k">Tone Alignment</div><div>${item.dims.tone.toFixed(1)}</div>
         </div>
-        ${item.recommendation ? `<div class="mt-16"><div style="font-weight:800;margin-bottom:6px">Recommended action</div><div class="text-secondary">${escapeHtml(item.recommendation)}</div></div>` : ''}
-        <div class="mt-16">
-          <button class="btn btn-secondary" id="draft-reengage"><i class="fas fa-pen"></i> Draft re-engagement message</button>
-        </div>
+        ${item.notes ? `<div class="mt-16"><div style="font-weight:800;margin-bottom:6px">Notes</div><div class="text-secondary">${escapeHtml(item.notes)}</div></div>` : ''}
+        ${item.context ? `<div class="mt-12"><div style="font-weight:800;margin-bottom:6px">Context</div><div class="text-secondary">${escapeHtml(item.context)}</div></div>` : ''}
       `;
-
-      qs('#draft-reengage').onclick = () => alert('Demo: drafts a message that leads with an unblock and a clear ask.');
 
       modal.style.display = 'flex';
     };

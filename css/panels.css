@@ -388,6 +388,32 @@
 }
 
 /* ===== Collaborator Sentiment ===== */
+.sentiment-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.sentiment-kpi {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: 14px;
+}
+
+.sentiment-kpi .num {
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+.sentiment-kpi .lbl {
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 .sentiment-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(240px, 1fr));

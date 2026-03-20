@@ -226,6 +226,22 @@
             <input type="text" placeholder="Search collaborators..." id="collab-search" />
           </div>
         </div>
+
+        <div class="card" style="margin-bottom:14px">
+          <div class="card-header">
+            <h3>Import Sentiment Report (JSON)</h3>
+            <span class="card-subtitle">Paste the JSON body from your daily sentiment draft. Demo-safe: stored only in your browser localStorage.</span>
+          </div>
+          <div class="form-group">
+            <textarea id="sentiment-import" placeholder="Paste report text here (we'll parse the first JSON object)..." style="min-height:120px"></textarea>
+          </div>
+          <div class="intake-actions" style="justify-content:flex-end">
+            <button class="btn btn-secondary" id="sentiment-import-clear"><i class="fas fa-eraser"></i> Clear</button>
+            <button class="btn btn-primary" id="sentiment-import-apply"><i class="fas fa-upload"></i> Load report</button>
+          </div>
+        </div>
+
+        <div id="sentiment-summary" class="sentiment-summary"></div>
         <div class="sentiment-grid" id="sentiment-grid"></div>
         <div class="sentiment-detail-modal" id="sentiment-modal" style="display:none;">
           <div class="modal-overlay"></div>

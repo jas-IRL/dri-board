@@ -140,7 +140,7 @@ const comms = {
   ]
 };
 
-const collaborators = [
+let collaborators = [
   {
     id: 'col1', tier: { org: 'Content Operations', role: 'Content Partner', individual: 'Content Partner (LND-1638)' },
     state: 'Cooling',
