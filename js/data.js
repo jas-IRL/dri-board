@@ -232,7 +232,7 @@ const recommendations = [
   },
 ];
 
-const wins = [
+let wins = [
   {
     id: 'win1', title: 'Closed New Hire Path v2 with ramp time reduction',
     desc: 'Delivered ramp curriculum refresh and assessment flow updates. Documented impact and archived artifacts.',
@@ -245,7 +245,7 @@ const wins = [
   }
 ];
 
-const decisions = [
+let decisions = [
   {
     id: 'd1', type: 'p-level', title: 'Classified Savings rate tier update as P0',
     decidedAt: '2026-03-10',

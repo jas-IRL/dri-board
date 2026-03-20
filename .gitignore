@@ -14,3 +14,6 @@ server/.venv/
 
 # Local bridge data
 server/data/
+
+# Local secrets (OAuth tokens, etc)
+server/.secrets/

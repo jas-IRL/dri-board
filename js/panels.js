@@ -505,25 +505,55 @@ function renderCollaboratorSentiment() {
     _wireSentimentImport();
     window.__sentiment_import_wired = true;
 
-    // If the user already has a saved report, auto-apply it once
-    try {
-      const raw = localStorage.getItem('DRI_SENTIMENT_REPORT_RAW') || '';
-      if (raw) {
-        const jsonStr = _extractFirstJsonObject(raw);
-        if (jsonStr) {
-          const report = JSON.parse(jsonStr);
-          const imported = _normalizeImportedSentiment(report);
-          if (imported.length) {
-            collaborators = imported;
-            const meta = `Report: ${(report.report_date || '').toString()} · Current week: ${escapeHtml(report.current_week_window || '')} · Rolling 90d: ${escapeHtml(report.rolling_90d_window || '')}`;
-            _renderSentimentSummaryFromItems(imported.map(c => ({ state: c.state, composite: c.composite })), meta);
+    // In LIVE/Bridge mode, prefer loading the latest report from the backend.
+    // This is async; when it completes we re-render this panel.
+    if (!window.__sentiment_live_tried) {
+      window.__sentiment_live_tried = true;
+      try {
+        if (window.DRI_LIVE && window.DRI_LIVE.enabled && window.DRI_LIVE.apiBase) {
+          fetch(`${window.DRI_LIVE.apiBase}/api/sentiment/latest`)
+            .then(r => r.ok ? r.json() : null)
+            .then(json => {
+              const report = json && json.report;
+              if (!report || !Array.isArray(report.collaborators) || report.collaborators.length === 0) return;
+              const imported = _normalizeImportedSentiment(report);
+              if (!imported.length) return;
+
+              collaborators = imported;
+              window.__sentiment_live_applied = true;
+
+              const meta = `Report: ${(report.report_date || '').toString()} · Current week: ${escapeHtml(report.current_week_window || '')} · Rolling 90d: ${escapeHtml(report.rolling_90d_window || '')}`;
+              _renderSentimentSummaryFromItems(imported.map(c => ({ state: c.state, composite: c.composite })), meta);
+
+              if (typeof renderAll === 'function') renderAll('collaborator-sentiment');
+            })
+            .catch(() => { /* ignore */ });
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    // If the user already has a saved report (demo/manual import), auto-apply it once.
+    // Only do this if we haven't already applied LIVE backend data.
+    if (!window.__sentiment_live_applied) {
+      try {
+        const raw = localStorage.getItem('DRI_SENTIMENT_REPORT_RAW') || '';
+        if (raw) {
+          const jsonStr = _extractFirstJsonObject(raw);
+          if (jsonStr) {
+            const report = JSON.parse(jsonStr);
+            const imported = _normalizeImportedSentiment(report);
+            if (imported.length) {
+              collaborators = imported;
+              const meta = `Report: ${(report.report_date || '').toString()} · Current week: ${escapeHtml(report.current_week_window || '')} · Rolling 90d: ${escapeHtml(report.rolling_90d_window || '')}`;
+              _renderSentimentSummaryFromItems(imported.map(c => ({ state: c.state, composite: c.composite })), meta);
+            }
           }
         }
-      }
-    } catch (e) { /* ignore */ }
+      } catch (e) { /* ignore */ }
+    }
 
-    // If no import exists, render a summary for the demo dataset
-    if (qs('#sentiment-summary') && (!localStorage.getItem('DRI_SENTIMENT_REPORT_RAW'))) {
+    // If we have neither live data nor a saved import, render a summary for the demo dataset
+    if (qs('#sentiment-summary') && (!window.__sentiment_live_applied) && (!localStorage.getItem('DRI_SENTIMENT_REPORT_RAW'))) {
       _renderSentimentSummaryFromItems(collaborators.map(c => ({ state: c.state, composite: c.composite })), 'Demo data (paste your report above to replace)');
     }
   }
