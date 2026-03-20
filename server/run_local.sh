@@ -26,24 +26,9 @@ echo "[setup] installing requirements"
 pip -q install -r requirements.txt
 
 echo ""
-echo "Claude Opus recommendations are optional."
-echo "If you want them enabled, paste your Anthropic API key when prompted."
-echo "(The key is NOT saved to disk; it's only used for this process.)"
+echo "[info] LLM/Claude recommendations are currently disabled in this build."
+echo "[info] Start the backend anyway to use Bridge Mode (SQLite) endpoints."
 echo ""
 
-read -r -p "Enable Claude recommendations? (y/N): " ENABLE
-ENABLE=${ENABLE:-N}
-
-if [[ "$ENABLE" =~ ^[Yy]$ ]]; then
-  read -r -s -p "Anthropic API key: " ANTHROPIC_API_KEY
-  echo ""
-  export ANTHROPIC_API_KEY
-  export ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-3-opus-20240229}"
-  echo "[ok] Claude enabled with model: $ANTHROPIC_MODEL"
-else
-  echo "[ok] Claude disabled (no ANTHROPIC_API_KEY set)"
-fi
-
-echo ""
 echo "[run] starting backend on http://localhost:5055"
 exec "$PYTHON_BIN" src/app.py

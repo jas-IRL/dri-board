@@ -1,10 +1,7 @@
 import os
 import time
 import uuid
-import json
 from datetime import datetime
-from urllib import request as urlrequest
-from urllib.error import HTTPError
 
 import feedparser
 from cachetools import TTLCache
@@ -104,121 +101,6 @@ def worldview():
     # sort by published where possible
     worldview_cache[key] = items
     return jsonify({"items": items, "cached": False, "ts": _iso_now()})
-
-
-
-# -----------------------------
-# Claude (Anthropic) recommendations (optional)
-# -----------------------------
-
-def _anthropic_model() -> str:
-    # Configure to your approved model name.
-    return os.environ.get("ANTHROPIC_MODEL", "claude-3-opus-20240229")
-
-
-def _anthropic_key():
-    return os.environ.get("ANTHROPIC_API_KEY")
-
-
-def _call_anthropic_messages(req_payload: dict) -> dict:
-    api_key = _anthropic_key()
-    if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY not set")
-
-    req = urlrequest.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=json.dumps(req_payload).encode("utf-8"),
-        headers={
-            "content-type": "application/json",
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-        },
-        method="POST",
-    )
-
-    try:
-        with urlrequest.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except HTTPError as e:
-        body = e.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"Anthropic HTTP {e.code}: {body}")
-
-
-def _build_recommendation_prompt(change_text: str, context: dict) -> str:
-    pb = playbook_prompt_block()
-
-    return (
-        "Generate operational readiness recommendations anchored to the PLAYBOOK. "
-        "Do NOT restate the playbook generically; make it specific to the change and provide concrete actions.\n\n"
-        f"CHANGE_DESCRIPTION:\n{change_text}\n\n"
-        f"CONTEXT_JSON:\n{json.dumps(context, ensure_ascii=False)}\n\n"
-        f"PLAYBOOK:\n{pb}\n\n"
-        "Return ONLY valid JSON (no markdown).\n"
-        "JSON schema:\n"
-        "{\n"
-        "  \"p_level\": \"P0|P1|P2|P3\",\n"
-        "  \"mode\": \"Launch Readiness|Operational Change Readiness|Performance Intervention Readiness|Regulatory and Policy Readiness|Reactive Risk and Recovery Readiness\",\n"
-        "  \"executive_summary\": string,\n"
-        "  \"clarifying_questions\": [string],\n"
-        "  \"elements\": [\n"
-        "    {\n"
-        "      \"name\": string,\n"
-        "      \"good_looks_like\": string,\n"
-        "      \"recommended_actions\": [{\"action\": string, \"why\": string, \"evidence\": string, \"owner_role\": string, \"timing\": string}],\n"
-        "      \"avoid\": [string],\n"
-        "      \"validation\": {\"t_plus_7\": [string], \"t_plus_30\": [string]}\n"
-        "    }\n"
-        "  ]\n"
-        "}\n"
-        "Constraints:\n"
-        "- Include exactly one elements[] entry for each readiness element listed in the PLAYBOOK, using identical names.\n"
-        "- Make rigor proportional to p_level (P0 most rigorous; P3 minimal).\n"
-    )
-
-
-@app.post("/api/recommendations")
-def recommendations():
-    payload = request.get_json(force=True, silent=True) or {}
-    text = (payload.get("text") or "").strip()
-    if not text:
-        return jsonify({"error": "text is required"}), 400
-
-    context = {
-        "p_level": payload.get("p_level"),
-        "mode": payload.get("mode"),
-        "deadline": payload.get("deadline"),
-        "channel": payload.get("channel"),
-        "lob": payload.get("lob"),
-        "impacted": payload.get("impacted"),
-    }
-
-    model = _anthropic_model()
-    prompt = _build_recommendation_prompt(text, context)
-
-    req_payload = {
-        "model": model,
-        "max_tokens": 1800,
-        "temperature": 0.2,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-
-    try:
-        raw = _call_anthropic_messages(req_payload)
-        content = raw.get("content") or []
-        text_out = ""
-        if isinstance(content, list) and content and isinstance(content[0], dict):
-            text_out = content[0].get("text") or ""
-
-        try:
-            obj = json.loads(text_out)
-            return jsonify({"ok": True, "data": obj, "model": model})
-        except Exception:
-            # Return raw text for debugging if model didn't emit valid JSON
-            return jsonify({"ok": True, "raw": text_out, "model": model, "warning": "Model output was not valid JSON"})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
 
 # -----------------------------
 # Bridge Mode API (local only)

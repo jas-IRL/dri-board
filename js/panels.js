@@ -599,26 +599,10 @@ function _inferDeadline(text) {
 }
 
 
+// Claude/LLM recommendations intentionally disabled for now.
+// (We’ll re-enable later once you provide an examples/actions library.)
 async function fetchPlaybookRecommendations(intake) {
-  if (!window.DRI_LIVE || !window.DRI_LIVE.enabled) return null;
-  try {
-    const res = await fetch(`${window.DRI_LIVE.apiBase}/api/recommendations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: intake.text,
-        p_level: intake.p_level,
-        mode: intake.readiness_mode,
-        deadline: intake.deadline,
-      })
-    });
-    if (!res.ok) return null;
-    const json = await res.json();
-    if (json && json.ok && json.data) return json.data;
-    return null;
-  } catch (e) {
-    return null;
-  }
+  return null;
 }
 
 function renderRecommendationsBlock(rec) {
