@@ -489,6 +489,8 @@ async function renderWorldview() {
   const activeType = qs('#worldview .filter-btn.active')?.getAttribute('data-wv') || 'all';
 
   let items = worldviewItems;
+  let matchedItems = null;
+  let generalItems = null;
 
   // If API_BASE is set, pull real external items from backend RSS aggregator
   const apiBase = (window.DRI_CONFIG && window.DRI_CONFIG.API_BASE) ? window.DRI_CONFIG.API_BASE : '';
@@ -497,8 +499,14 @@ async function renderWorldview() {
       const res = await fetch(`${apiBase}/api/worldview`);
       if (res.ok) {
         const json = await res.json();
-        if (json && Array.isArray(json.items) && json.items.length) {
-          items = json.items;
+        if (json) {
+          if (Array.isArray(json.matched_items) || Array.isArray(json.general_items)) {
+            matchedItems = Array.isArray(json.matched_items) ? json.matched_items : [];
+            generalItems = Array.isArray(json.general_items) ? json.general_items : [];
+            items = (matchedItems.concat(generalItems));
+          } else if (Array.isArray(json.items) && json.items.length) {
+            items = json.items;
+          }
         }
       }
     } catch (e) {
@@ -506,26 +514,71 @@ async function renderWorldview() {
     }
   }
 
-  items = items.filter(w => !store.snoozed.worldview.has(w.id));
-  if (activeType !== 'all') {
-    items = items.filter(w => (w.type || '').toLowerCase() === activeType);
-  }
+  // Apply snoozes + type filter
+  const filterItems = (arr) => {
+    let x = (arr || []).filter(w => !store.snoozed.worldview.has(w.id));
+    if (activeType !== 'all') {
+      x = x.filter(w => (w.type || '').toLowerCase() === activeType);
+    }
+    return x;
+  };
 
   const grid = qs('#worldview-grid');
-  grid.innerHTML = items.map(w => `
-    <div class="wv-card">
-      <div class="flex justify-between items-center gap-12">
-        <span class="type-badge ${(w.type || '').toLowerCase()}">${escapeHtml(w.type || '')}</span>
-        <button class="btn btn-secondary btn-sm" data-snooze-wv="${escapeHtml(w.id)}"><i class="fas fa-clock"></i> Not Relevant</button>
+
+  // If we have relevance-aware groups from backend: show Relevant first + FYI section.
+  if (matchedItems && generalItems) {
+    const rel = filterItems(matchedItems);
+    const fyi = filterItems(generalItems);
+
+    const renderCard = (w) => {
+      const why = Array.isArray(w.relevanceWhy) && w.relevanceWhy.length
+        ? `<div class="text-muted" style="font-size:0.75rem; margin-top:8px">Matched: ${w.relevanceWhy.map(escapeHtml).join(', ')}</div>`
+        : '';
+
+      const relevanceLine = w.relevance
+        ? `<div class="text-muted" style="font-size:0.8rem">Relevant to: <span class="text-secondary">${escapeHtml(w.relevance)}</span>${w.relevanceScore ? ` <span class="text-muted">(score ${escapeHtml(w.relevanceScore)})</span>` : ''}</div>`
+        : `<div class="text-muted" style="font-size:0.8rem">FYI (not mapped to an active initiative)</div>`;
+
+      return `
+        <div class="wv-card">
+          <div class="flex justify-between items-center gap-12">
+            <span class="type-badge ${(w.type || '').toLowerCase()}">${escapeHtml(w.type || '')}</span>
+            <button class="btn btn-secondary btn-sm" data-snooze-wv="${escapeHtml(w.id)}"><i class="fas fa-clock"></i> Not Relevant</button>
+          </div>
+          <div class="wv-title">${escapeHtml(w.title)}</div>
+          <div class="wv-summary">${escapeHtml(w.summary)}</div>
+          <div class="wv-footer">${relevanceLine}</div>
+          ${why}
+          ${w.soWhat ? `<div class="wv-so-what"><b>So what:</b> ${escapeHtml(w.soWhat)}</div>` : ''}
+        </div>
+      `;
+    };
+
+    grid.innerHTML = `
+      <div class="wv-section">Relevant to active initiatives</div>
+      ${rel.length ? rel.map(renderCard).join('') : `<div class="wv-empty">No relevant items found for your active initiatives.</div>`}
+      <div class="wv-section">FYI (top external signals)</div>
+      ${fyi.length ? fyi.map(renderCard).join('') : `<div class="wv-empty">No FYI items right now.</div>`}
+    `;
+
+  } else {
+    // Legacy/demo mode
+    items = filterItems(items);
+    grid.innerHTML = items.map(w => `
+      <div class="wv-card">
+        <div class="flex justify-between items-center gap-12">
+          <span class="type-badge ${(w.type || '').toLowerCase()}">${escapeHtml(w.type || '')}</span>
+          <button class="btn btn-secondary btn-sm" data-snooze-wv="${escapeHtml(w.id)}"><i class="fas fa-clock"></i> Not Relevant</button>
+        </div>
+        <div class="wv-title">${escapeHtml(w.title)}</div>
+        <div class="wv-summary">${escapeHtml(w.summary)}</div>
+        <div class="wv-footer">
+          <div class="text-muted" style="font-size:0.8rem">Relevance: <span class="text-secondary">${escapeHtml(w.relevance)}</span></div>
+        </div>
+        <div class="wv-so-what"><b>So what:</b> ${escapeHtml(w.soWhat)}</div>
       </div>
-      <div class="wv-title">${escapeHtml(w.title)}</div>
-      <div class="wv-summary">${escapeHtml(w.summary)}</div>
-      <div class="wv-footer">
-        <div class="text-muted" style="font-size:0.8rem">Relevance: <span class="text-secondary">${escapeHtml(w.relevance)}</span></div>
-      </div>
-      <div class="wv-so-what"><b>So what:</b> ${escapeHtml(w.soWhat)}</div>
-    </div>
-  `).join('');
+    `).join('');
+  }
 
   qsa('#worldview .filter-btn').forEach(btn => {
     btn.onclick = () => {

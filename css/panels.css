@@ -1,4 +1,26 @@
 /* ============================================
+
+/* ===== Worldview relevance sections ===== */
+.wv-section {
+  grid-column: 1 / -1;
+  padding: 10px 12px;
+  margin: 8px 0 2px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04);
+  border-radius: 10px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.wv-empty {
+  grid-column: 1 / -1;
+  padding: 10px 12px;
+  color: rgba(255,255,255,0.65);
+  border: 1px dashed rgba(255,255,255,0.12);
+  border-radius: 10px;
+  background: rgba(0,0,0,0.12);
+}
+
    DRI BOARD - PANEL STYLES
    ============================================ */
 

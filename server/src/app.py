@@ -82,12 +82,107 @@ def health():
     return jsonify({"ok": True, "ts": _iso_now()})
 
 
+def _wv_tokenize(s: str):
+    import re
+    s = (s or "").lower()
+    # basic word tokenizer
+    return re.findall(r"[a-z0-9]+", s)
+
+
+def _wv_build_initiative_profiles():
+    """Build lightweight keyword profiles from ACTIVE and IN MEASUREMENT initiatives.
+
+    This is intentionally simple (no LLM). It's meant to reduce noise by ranking
+    RSS items against what you're actively running.
+    """
+
+    stop = {
+        "the","a","an","and","or","to","of","in","for","on","with","by","from","as","at","is","are","be",
+        "this","that","it","its","we","you","your","our","their","they","will","can","may","should","new",
+    }
+
+    # Tiny synonym expansion to improve hit-rate for common ops readiness topics.
+    synonyms = {
+        "dispute": ["dispute", "disputes", "chargeback", "chargebacks", "claim", "claims"],
+        "fraud": ["fraud", "scam", "scams", "ato", "accounttakeover"],
+        "complaint": ["complaint", "complaints", "cfpb"],
+        "compliance": ["compliance", "regulatory", "policy", "cfpb"],
+        "training": ["training", "enablement", "microlearning"],
+        "quality": ["quality", "qa", "audit"],
+    }
+
+    profiles = []
+    with db_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, COALESCE(jira_key, id) as key, title, COALESCE(description,'') as description,
+                   COALESCE(lob,'') as lob, COALESCE(readiness_mode,'') as readiness_mode
+            FROM initiatives
+            WHERE lifecycle IN ('Active','In Measurement')
+            ORDER BY updated_at DESC
+            """
+        ).fetchall()
+
+    for r in rows:
+        blob = f"{r['title']} {r['description']} {r['lob']} {r['readiness_mode']}"
+        toks = [t for t in _wv_tokenize(blob) if t not in stop and len(t) > 2]
+        kw = set(toks)
+
+        # expand synonyms if any seed word exists
+        for seed, vals in synonyms.items():
+            if seed in kw:
+                kw.update(vals)
+
+        profiles.append(
+            {
+                "id": r["id"],
+                "key": r["key"],
+                "title": r["title"],
+                "keywords": kw,
+            }
+        )
+
+    return profiles
+
+
+def _wv_score_item(item: dict, profiles: list):
+    title = (item.get("title") or "")
+    summary = (item.get("summary") or "")
+    t_toks = set(_wv_tokenize(title))
+    s_toks = set(_wv_tokenize(summary))
+
+    best = None
+    best_score = 0
+    best_hits = []
+
+    for p in profiles:
+        hits_title = sorted(list(t_toks & p["keywords"]))
+        hits_summary = sorted(list(s_toks & p["keywords"]))
+
+        # title matches are stronger than summary matches
+        score = (len(hits_title) * 4) + (len(hits_summary) * 1)
+
+        if score > best_score:
+            best_score = score
+            best = p
+            best_hits = (hits_title[:6] + hits_summary[:6])[:8]
+
+    return best, best_score, best_hits
+
+
 @app.get("/api/worldview")
 def worldview():
     # cache key can include types later
     key = "default"
     if key in worldview_cache:
-        return jsonify({"items": worldview_cache[key], "cached": True, "ts": _iso_now()})
+        cached = worldview_cache[key]
+        return jsonify({
+            "items": cached.get("items") or [],
+            "matched_items": cached.get("matched_items") or [],
+            "general_items": cached.get("general_items") or [],
+            "cached": True,
+            "ts": _iso_now(),
+        })
 
     items = []
     for src in RSS_SOURCES:
@@ -98,9 +193,42 @@ def worldview():
         except Exception:
             continue
 
-    # sort by published where possible
-    worldview_cache[key] = items
-    return jsonify({"items": items, "cached": False, "ts": _iso_now()})
+    profiles = _wv_build_initiative_profiles()
+
+    matched = []
+    general = []
+
+    # threshold keeps matches meaningful; tune as needed
+    THRESHOLD = 5
+
+    for it in items:
+        best, score, hits = _wv_score_item(it, profiles)
+        if best and score >= THRESHOLD:
+            it["relevance"] = best["key"]
+            it["relevanceTitle"] = best["title"]
+            it["relevanceScore"] = score
+            it["relevanceWhy"] = hits
+            matched.append(it)
+        else:
+            general.append(it)
+
+    # sort matched by score desc, then keep general in original order
+    matched.sort(key=lambda x: x.get("relevanceScore", 0), reverse=True)
+
+    # keep FYI small
+    general = general[:6]
+
+    payload = {
+        # Back-compat: keep items as a single list, but prefer matched/general in UI
+        "items": matched + general,
+        "matched_items": matched,
+        "general_items": general,
+        "cached": False,
+        "ts": _iso_now(),
+    }
+
+    worldview_cache[key] = payload
+    return jsonify(payload)
 
 # -----------------------------
 # Bridge Mode API (local only)
