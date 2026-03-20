@@ -112,7 +112,8 @@ function renderMissionControl() {
 
   // Urgent recommendations
   const mcRecs = qs('#mc-recs');
-  const visibleRecs = recommendations.filter(r => !store.snoozed.recs.has(r.id)).slice(0, 3);
+  const recSource = (typeof deriveRecommendations === 'function') ? deriveRecommendations() : recommendations;
+  const visibleRecs = recSource.filter(r => !store.snoozed.recs.has(r.id)).slice(0, 3);
   mcRecs.innerHTML = visibleRecs.map(r => `
     <div class="rec-card">
       <div class="rec-title">${escapeHtml(r.title)}</div>
@@ -593,9 +594,137 @@ async function renderWorldview() {
   });
 }
 
+
+// =============================
+// AI Recommender (rule-based, no LLM)
+// =============================
+
+function _inferElementKeyFromText(text) {
+  const t = (text || '').toLowerCase();
+  if (t.includes('knowledge')) return 'knowledge';
+  if (t.includes('training')) return 'training';
+  if (t.includes('tool')) return 'tooling';
+  if (t.includes('quality') || t.includes('qa')) return 'quality';
+  if (t.includes('workforce')) return 'workforce';
+  if (t.includes('vendor') || t.includes('bpo')) return 'bpo';
+  if (t.includes('operations')) return 'operations';
+  if (t.includes('communication') || t.includes('comms')) return 'comms';
+  if (t.includes('operational readiness')) return 'or';
+  if (t.includes('compliance') || t.includes('regulatory') || t.includes('legal')) return 'compliance';
+  if (t.includes('measurement') || t.includes('metric') || t.includes('kpi') || t.includes('data')) return 'measurement';
+  return null;
+}
+
+function deriveRecommendations() {
+  // Demo mode: keep existing static list
+  if (!window.DRI_LIVE || !window.DRI_LIVE.enabled) {
+    return recommendations;
+  }
+
+  const pbEls = (window.DRI_PLAYBOOK && Array.isArray(window.DRI_PLAYBOOK.readinessElements))
+    ? window.DRI_PLAYBOOK.readinessElements
+    : [];
+
+  const pWeightRec = (p) => ({ P0: 4, P1: 3, P2: 2, P3: 1 }[p] ?? 1);
+
+  const recs = [];
+
+  initiatives
+    .filter(i => ['Active', 'In Measurement'].includes(i.lifecycle))
+    .forEach(i => {
+      const p = i.pLevel || 'P2';
+      const w = pWeightRec(p);
+      const dleft = daysUntil(i.deadline || '');
+
+      const checklist = Array.isArray(i.checklist) ? i.checklist : [];
+      const incomplete = checklist.filter(c => !c.done);
+      const total = checklist.length || 0;
+      const progress = total ? Math.round(((total - incomplete.length) / total) * 100) : 0;
+
+      // Which elements look incomplete (by name match in checklist item text)
+      const incompleteByKey = new Set();
+      for (const c of incomplete) {
+        const k = _inferElementKeyFromText(c.text);
+        if (k) incompleteByKey.add(k);
+      }
+
+      // 1) Deadline risk
+      if (Number.isFinite(dleft) && dleft <= 7 && progress < 70) {
+        recs.push({
+          id: `live::deadline-risk::${i.id}`,
+          title: `Deadline risk: accelerate readiness for ${i.id}`,
+          whyNow: `${dleft}d to deadline with ${progress}% readiness complete`,
+          tenet: 'Scale rigor to the P-level; don’t discover gaps at the end',
+          effort: '15-30 min to triage + replan',
+          initiativeId: i.id,
+          pLevel: p,
+          score: (100 * w) + Math.max(0, (8 - dleft) * 6) + Math.max(0, (70 - progress)),
+          kind: 'triage'
+        });
+      }
+
+      // 2) Critical element gaps (P0/P1)
+      if (['P0','P1'].includes(p)) {
+        const criticalKeys = ['comms','training','measurement','compliance'];
+        for (const ck of criticalKeys) {
+          if (incompleteByKey.has(ck)) {
+            const el = pbEls.find(e => e.key === ck);
+            recs.push({
+              id: `live::critical-gap::${ck}::${i.id}`,
+              title: `${el ? el.name : ck}: close the gap for ${i.id}`,
+              whyNow: `P0/P1 rigor: ${el ? el.name : ck} is not complete`,
+              tenet: 'Field signals matter; enable fast change; measure by performance',
+              effort: '20-45 min',
+              initiativeId: i.id,
+              pLevel: p,
+              score: (95 * w) + (Number.isFinite(dleft) && dleft <= 14 ? 25 : 0) + 10,
+              kind: 'element'
+            });
+          }
+        }
+      }
+
+      // 3) Next checklist item suggestion (always useful)
+      if (incomplete.length) {
+        const next = incomplete
+          .slice()
+          .sort((a,b) => (daysUntil(a.due || '2099-01-01') - daysUntil(b.due || '2099-01-01')))[0];
+
+        const nd = next && next.due ? daysUntil(next.due) : null;
+
+        recs.push({
+          id: `live::next-action::${i.id}::${next.id || 'x'}`,
+          title: `Next action for ${i.id}: ${next.text}`,
+          whyNow: (nd !== null && Number.isFinite(nd)) ? `Due in ${nd}d` : 'Incomplete readiness item',
+          tenet: 'Clear ownership; unblock fast',
+          effort: '10-20 min',
+          initiativeId: i.id,
+          pLevel: p,
+          score: (60 * w) + (nd !== null && Number.isFinite(nd) ? Math.max(0, (30 - nd)) : 0),
+          kind: 'checklist'
+        });
+      }
+    });
+
+  // Sort and return
+  recs.sort((a,b) => (b.score ?? 0) - (a.score ?? 0));
+
+  // De-dupe by id
+  const seen = new Set();
+  const out = [];
+  for (const r of recs) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push(r);
+  }
+
+  return out.slice(0, 25);
+}
+
 function renderRecommender() {
   const list = qs('#recommender-list');
-  const items = recommendations.filter(r => !store.snoozed.recs.has(r.id)).slice(0, 7);
+  const all = deriveRecommendations();
+  const items = all.filter(r => !store.snoozed.recs.has(r.id)).slice(0, 7);
   list.innerHTML = items.map(r => {
     const init = initiatives.find(i => i.id === r.initiativeId);
     return `
